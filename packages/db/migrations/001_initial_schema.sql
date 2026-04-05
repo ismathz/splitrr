@@ -1,0 +1,1 @@
+-- mirrored in src/schema.ts to keep runtime migration self-contained

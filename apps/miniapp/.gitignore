@@ -1,0 +1,14 @@
+node_modules/
+.bun/
+.env
+.env.*
+dist/
+coverage/
+build/
+*.tsbuildinfo
+.agents/
+*.db
+*.db-shm
+*.db-wal
+*.log
+

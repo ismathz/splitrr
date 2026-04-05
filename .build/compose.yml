@@ -1,0 +1,7 @@
+ services:
+    miniapp:
+       build:
+         context: ../
+         dockerfile: .build/miniapp.Dockerfile
+       hostname: miniapp
+       image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-ismathz}/splitbot/apps/miniapp:latest

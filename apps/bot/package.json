@@ -1,0 +1,18 @@
+{
+  "name": "@splitbot/bot",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "latest",
+    "@mtcute/core": "^0.29.4",
+    "@mtcute/node": "^0.29.4",
+    "better-sqlite3": "workspace:*",
+    "@splitbot/db": "workspace:*",
+    "grammy": "latest",
+    "hono": "latest",
+    "zod": "latest"
+  }
+}
