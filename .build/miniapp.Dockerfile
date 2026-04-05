@@ -2,7 +2,7 @@ FROM oven/bun:1.3.11 AS builder
 
 WORKDIR /app
 
-COPY apps/miniapp/package.json ./
+COPY apps/miniapp/ ./
 
 RUN bun install
 
