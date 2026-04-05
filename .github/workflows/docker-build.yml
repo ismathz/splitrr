@@ -33,17 +33,7 @@ jobs:
         working-directory: .build
         run: docker compose -f compose.yml build
 
-      - name: Tag commit SHA
-        if: github.event_name != 'pull_request'
-        run: |
-          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER}/splitbot/apps/miniapp"
-          docker tag "${IMAGE}:latest" "${IMAGE}:${GITHUB_SHA}"
-
       - name: Docker Compose push
         if: github.event_name != 'pull_request'
         working-directory: .build
         run: docker compose -f compose.yml push
-
-      - name: Push SHA tag
-        if: github.event_name != 'pull_request'
-        run: docker push "ghcr.io/${GITHUB_REPOSITORY_OWNER}/splitbot/apps/miniapp:${GITHUB_SHA}"
