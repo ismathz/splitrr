@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": true,
+    "outDir": "./types",
+    "tsBuildInfoFile": "./node_modules/.cache/miniapp.tsbuildinfo",
+    "noEmit": false
+  },
+  "include": ["src/**/*"]
+}

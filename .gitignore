@@ -1,0 +1,17 @@
+node_modules
+**/node_modules/
+.bun
+**/.bun/
+.env
+.env.*
+*.db
+*.db-shm
+*.db-wal
+**/mtcute.session
+**/mtcute.session-journal
+dist
+**/dist/
+coverage
+**/coverage/
+*.tsbuildinfo
+apps/miniapp/types/
