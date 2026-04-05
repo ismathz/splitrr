@@ -8,7 +8,7 @@ RUN bun install
 
 COPY apps/miniapp/ ./
 
-RUN bun build
+RUN bun run build
 
 FROM nginx:stable-alpine
 
