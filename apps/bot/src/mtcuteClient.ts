@@ -1,8 +1,7 @@
 import { join, dirname } from "node:path";
-import { TelegramClient } from "@mtcute/node";
+import { SqliteStorage, TelegramClient } from "@mtcute/bun";
 
 import { env } from "./env";
-import { createBunSqliteStorage } from "./mtcuteBunStorage";
 
 const CACHE_TTL_MS = 45_000;
 
@@ -141,7 +140,7 @@ export async function initMtcute(): Promise<void> {
   const tg = new TelegramClient({
     apiId: env.TELEGRAM_API_ID,
     apiHash: env.TELEGRAM_API_HASH,
-    storage: createBunSqliteStorage(sessionStoragePath())
+    storage: new SqliteStorage(sessionStoragePath())
   });
 
   await tg.start({ botToken: env.TELEGRAM_BOT_TOKEN });

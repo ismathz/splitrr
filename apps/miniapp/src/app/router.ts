@@ -7,6 +7,7 @@ import {
 
 import { AppShell } from "./AppShell";
 import { BillDetailsScreen } from "./screens/BillDetailsScreen";
+import { BillHistoryScreen } from "./screens/BillHistoryScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { NewBillScreen } from "./screens/NewBillScreen";
 
@@ -23,6 +24,12 @@ const homeRoute = createRoute({
 const newBillRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/new-bill",
+  validateSearch: (search: Record<string, unknown>) => ({
+    source:
+      search.source === "scratch" || search.source === "scan"
+        ? search.source
+        : undefined,
+  }),
   component: NewBillScreen,
 });
 
@@ -36,9 +43,16 @@ const billDetailsRoute = createRoute({
   },
 });
 
+const billHistoryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/bills",
+  component: BillHistoryScreen,
+});
+
 const routeTree = rootRoute.addChildren([
   homeRoute,
   newBillRoute,
+  billHistoryRoute,
   billDetailsRoute,
 ]);
 
@@ -49,6 +63,9 @@ export const router = createRouter({
 declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router;
+  }
+  interface HistoryState {
+    receiptFile?: File;
   }
 }
 

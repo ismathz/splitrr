@@ -100,8 +100,10 @@ bot.command("newbill", async (ctx) => {
     id: billId,
     groupId,
     title: `Bill ${new Date().toISOString().slice(0, 10)}`,
-    status: "uploaded",
-    createdByUserId: undefined
+    status: "draft",
+    createdByUserId: undefined,
+    billDate: new Date().toISOString().slice(0, 10),
+    place: null
   });
 
   const startPayload = { cid: String(chat.id) };
@@ -140,13 +142,20 @@ bot.command("history", async (ctx) => {
 
   const bills = db
     .query(
-      `SELECT id, title, status, created_at
+      `SELECT id, title, status, bill_date, place, created_at
        FROM bill_sessions
        WHERE group_id = ?1
        ORDER BY created_at DESC
        LIMIT 10`
     )
-    .all(row.id) as Array<{ id: string; title: string; status: string; created_at: string }>;
+    .all(row.id) as Array<{
+    id: string;
+    title: string;
+    status: string;
+    bill_date: string;
+    place: string | null;
+    created_at: string;
+  }>;
 
   if (!bills.length) {
     await ctx.reply("No bills yet. Use /newbill first.");
@@ -154,7 +163,10 @@ bot.command("history", async (ctx) => {
   }
 
   const text = bills
-    .map((b) => `- ${b.title} (${b.status}) ${new Date(b.created_at).toLocaleDateString()}`)
+    .map((b) => {
+      const where = b.place ? ` · ${b.place}` : "";
+      return `- ${b.title} (${b.status}) · ${b.bill_date}${where}`;
+    })
     .join("\n");
 
   await ctx.reply(`Recent bills:\n${text}`);

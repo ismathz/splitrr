@@ -1,21 +1,22 @@
 import OpenAI from "openai";
 import { z } from "zod";
 import type { ParsedReceipt } from "@splitbot/shared";
+import { normalizeCurrencyCode } from "@splitbot/shared";
 
 const parsedReceiptSchema = z.object({
-  merchantName: z.string().optional(),
+  merchantName: z.string().nullable().optional(),
   currency: z.string().default("USD"),
-  subtotalCents: z.number().int().optional(),
-  taxCents: z.number().int().optional(),
-  tipCents: z.number().int().optional(),
-  totalCents: z.number().int().optional(),
+  subtotalCents: z.number().int().nullable().optional(),
+  taxCents: z.number().int().nullable().optional(),
+  tipCents: z.number().int().nullable().optional(),
+  totalCents: z.number().int().nullable().optional(),
   rawText: z.string(),
   items: z.array(
     z.object({
       name: z.string(),
       qty: z.number().positive(),
-      unitPriceCents: z.number().int().nonnegative(),
-      totalPriceCents: z.number().int().nonnegative(),
+      unitPriceCents: z.number().int(),
+      totalPriceCents: z.number().int(),
       confidence: z.number().min(0).max(1)
     })
   )
@@ -38,7 +39,7 @@ export class OpenAiOcrProvider {
         {
           role: "system",
           content:
-            "Extract receipt line-items and totals. Return strict JSON matching schema. Prices must be in cents."
+            "Extract receipt line-items and totals. Return strict JSON matching schema. Prices must be in cents. Set currency to the ISO 4217 three-letter code implied by the receipt (symbols, text, or country context), e.g. USD, EUR, MVR. If the image is blank, too dark, too blurry, or has no readable receipt text, do not guess. In that case return merchantName=null, rawText='', items=[], subtotalCents=null, taxCents=null, tipCents=null, totalCents=null."
         },
         {
           role: "user",
@@ -63,12 +64,12 @@ export class OpenAiOcrProvider {
             type: "object",
             additionalProperties: false,
             properties: {
-              merchantName: { type: "string" },
+              merchantName: { type: ["string", "null"] },
               currency: { type: "string" },
-              subtotalCents: { type: "integer" },
-              taxCents: { type: "integer" },
-              tipCents: { type: "integer" },
-              totalCents: { type: "integer" },
+              subtotalCents: { type: ["integer", "null"] },
+              taxCents: { type: ["integer", "null"] },
+              tipCents: { type: ["integer", "null"] },
+              totalCents: { type: ["integer", "null"] },
               rawText: { type: "string" },
               items: {
                 type: "array",
@@ -92,13 +93,32 @@ export class OpenAiOcrProvider {
                 }
               }
             },
-            required: ["currency", "rawText", "items"]
+            required: [
+              "merchantName",
+              "currency",
+              "subtotalCents",
+              "taxCents",
+              "tipCents",
+              "totalCents",
+              "rawText",
+              "items"
+            ]
           }
         }
       }
     });
 
     const payload = JSON.parse(response.output_text);
-    return parsedReceiptSchema.parse(payload);
+    const parsed = parsedReceiptSchema.parse(payload);
+    return {
+      merchantName: parsed.merchantName ?? undefined,
+      currency: normalizeCurrencyCode(parsed.currency),
+      subtotalCents: parsed.subtotalCents ?? undefined,
+      taxCents: parsed.taxCents ?? undefined,
+      tipCents: parsed.tipCents ?? undefined,
+      totalCents: parsed.totalCents ?? undefined,
+      rawText: parsed.rawText,
+      items: parsed.items
+    };
   }
 }

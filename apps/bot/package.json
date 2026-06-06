@@ -7,9 +7,7 @@
   },
   "dependencies": {
     "@hono/node-server": "latest",
-    "@mtcute/core": "^0.29.4",
-    "@mtcute/node": "^0.29.4",
-    "better-sqlite3": "workspace:*",
+    "@mtcute/bun": "0.29.4",
     "@splitbot/db": "workspace:*",
     "grammy": "latest",
     "hono": "latest",

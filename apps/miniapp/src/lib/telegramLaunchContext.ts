@@ -176,7 +176,13 @@ export function useTelegramLaunchContext(): TelegramLaunchContext {
       }
     ).Telegram?.WebApp;
     wa?.ready?.();
-    queueMicrotask(() => setCtx(readTelegramLaunchContext()));
+    const refresh = () => setCtx(readTelegramLaunchContext());
+    queueMicrotask(refresh);
+    // `initDataUnsafe.chat` can appear shortly after `ready()` on some clients.
+    const timeouts = [50, 150, 400, 1000].map((ms) =>
+      setTimeout(refresh, ms),
+    );
+    return () => timeouts.forEach(clearTimeout);
   }, []);
 
   return ctx;

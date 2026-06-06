@@ -6,6 +6,9 @@
 @custom-variant dark (&:is(.dark *));
 
 @layer base {
+  #root {
+    @apply mx-auto w-full max-w-md;
+  }
   body {
     @apply antialiased bg-background text-foreground;
   }
