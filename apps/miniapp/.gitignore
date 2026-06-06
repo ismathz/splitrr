@@ -2,6 +2,7 @@ node_modules/
 .bun/
 .env
 .env.*
+!.env.example
 dist/
 coverage/
 build/

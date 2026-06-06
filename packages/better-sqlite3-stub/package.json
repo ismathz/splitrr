@@ -1,7 +1,0 @@
-{
-  "name": "better-sqlite3",
-  "version": "0.0.0-stub",
-  "description": "Stub so @mtcute/node can load under Bun; real usage is bun:sqlite via BaseSqliteStorage.",
-  "type": "module",
-  "main": "index.js"
-}

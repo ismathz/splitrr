@@ -1,4 +1,12 @@
+import { config } from "dotenv";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// Monorepo root first, then apps/api (later wins for duplicate keys).
+config({ path: resolve(__dirname, "../../../.env") });
+config({ path: resolve(__dirname, "../.env") });
 
 const envSchema = z.object({
   NODE_ENV: z.string().default("development"),

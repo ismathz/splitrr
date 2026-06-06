@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -21,51 +21,129 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-import { mockBills, type BillDetails } from "../billMock";
+import {
+  formatBillDateLabel,
+  mockBills,
+  type BillDetails,
+} from "../billMock";
+import {
+  getGroupHistoryByTelegramChatId,
+  getSplitbotApiBase,
+  resolveBillContextForApi,
+} from "@/lib/splitbotApi";
+import { useTelegramLaunchContext } from "@/lib/telegramLaunchContext";
+
+const BILL_HISTORY_PREVIEW_LIMIT = 4;
 
 const billStatusBadgeClass: Record<BillDetails["status"], string> = {
-  uploaded: "bg-sky-500/15 text-sky-700",
-  parsed: "bg-violet-500/15 text-violet-700",
-  assigning: "bg-amber-500/15 text-amber-700",
-  confirmed: "bg-emerald-500/15 text-emerald-700",
+  draft: "bg-sky-500/15 text-sky-700",
+  active: "bg-amber-500/15 text-amber-700",
+  settled: "bg-emerald-500/15 text-emerald-700",
 };
 
 function BillRow({ bill, onView }: { bill: BillDetails; onView: () => void }) {
   return (
-    <Card className="flex items-center justify-between rounded-lg border p-3">
+    <Card
+      className="cursor-pointer rounded-lg border p-3 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={onView}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onView();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+    >
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="truncate font-medium">{bill.title}</span>
           <Badge
             variant="secondary"
-            className={billStatusBadgeClass[bill.status]}
+            className={`${billStatusBadgeClass[bill.status]} capitalize`}
           >
             {bill.status}
           </Badge>
         </div>
-        <div className="mt-1 text-xs text-muted-foreground font-mono break-all">
-          {bill.id}
+        <div className="mt-1 text-xs text-muted-foreground">
+          <span>{formatBillDateLabel(bill.billDate)}</span>
+          {bill.place ? (
+            <>
+              <span className="mx-1.5 text-border">·</span>
+              <span>{bill.place}</span>
+            </>
+          ) : null}
         </div>
       </div>
-      <Button size="sm" variant="outline" onClick={onView}>
-        View
-      </Button>
     </Card>
   );
 }
 
 export function HomeScreen() {
   const navigate = useNavigate();
+  const launchCtx = useTelegramLaunchContext();
+  const splitbotApiBase = useMemo(() => getSplitbotApiBase(), []);
+  const billApiContext = useMemo(
+    () => resolveBillContextForApi(launchCtx),
+    [
+      launchCtx.chat?.id,
+      launchCtx.chat?.title,
+      launchCtx.startParam,
+      launchCtx.chatType,
+      launchCtx.currentUser?.id,
+    ],
+  );
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
 
   const [isSelecting, setIsSelecting] = useState(false);
+  const [serverBills, setServerBills] = useState<BillDetails[] | null>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
-  const activeBills = mockBills.filter((b) => !b.settled);
-  const settledBills = mockBills.filter((b) => b.settled);
+  useEffect(() => {
+    let cancelled = false;
+    setServerBills(null);
 
-  const goToNewBill = () => {
-    navigate({ to: "/new-bill" });
+    if (!splitbotApiBase || !billApiContext) return;
+
+    setIsLoadingHistory(true);
+    (async () => {
+      try {
+        const { bills } = await getGroupHistoryByTelegramChatId(
+          splitbotApiBase,
+          billApiContext.telegramChatId,
+          launchCtx.currentUser?.id,
+        );
+        if (cancelled) return;
+        setServerBills(
+          bills.map((bill) => ({
+            ...bill,
+            place: bill.place ?? null,
+            items: [],
+          })),
+        );
+      } catch {
+        if (!cancelled) {
+          setServerBills(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingHistory(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [splitbotApiBase, billApiContext, launchCtx.currentUser?.id]);
+
+  const bills = serverBills ?? mockBills;
+  const billHistoryPreview = bills.slice(0, BILL_HISTORY_PREVIEW_LIMIT);
+  const hasMoreBills = bills.length > BILL_HISTORY_PREVIEW_LIMIT;
+
+  const goToNewBillScratch = () => {
+    navigate({ to: "/new-bill", search: { source: "scratch" } });
   };
 
   return (
@@ -85,9 +163,15 @@ export function HomeScreen() {
             accept="image/*"
             capture="environment"
             className="hidden"
-            onChange={() => {
+            onChange={(e) => {
               setIsSelecting(false);
-              goToNewBill();
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              navigate({
+                to: "/new-bill",
+                search: { source: "scan" },
+                state: file ? { receiptFile: file } : undefined,
+              });
             }}
           />
           <input
@@ -95,9 +179,15 @@ export function HomeScreen() {
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={() => {
+            onChange={(e) => {
               setIsSelecting(false);
-              goToNewBill();
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              navigate({
+                to: "/new-bill",
+                search: { source: "scan" },
+                state: file ? { receiptFile: file } : undefined,
+              });
             }}
           />
 
@@ -137,7 +227,7 @@ export function HomeScreen() {
               className="w-full"
               disabled={isSelecting}
               variant="outline"
-              onClick={goToNewBill}
+              onClick={goToNewBillScratch}
               size="lg"
             >
               <HugeiconsIcon
@@ -150,14 +240,27 @@ export function HomeScreen() {
           </div>
         </CardContent>
       </Card>
-      {activeBills.length > 0 ? (
+      {bills.length > 0 ? (
         <div>
-          <div className="space-y-1">
-            <CardTitle>Active bills</CardTitle>
-            <CardDescription>Bills that are not settled yet.</CardDescription>
+          <div className="flex items-end justify-between gap-3">
+            <div className="space-y-1">
+              <CardTitle>Bill history</CardTitle>
+              <CardDescription>
+                {serverBills ? "Your recent bills." : "Mocked history for now."}
+              </CardDescription>
+            </div>
+            {hasMoreBills ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate({ to: "/bills" })}
+              >
+                See all
+              </Button>
+            ) : null}
           </div>
           <div className="space-y-2 mt-3">
-            {activeBills.map((bill) => (
+            {billHistoryPreview.map((bill) => (
               <BillRow
                 key={bill.id}
                 bill={bill}
@@ -167,22 +270,17 @@ export function HomeScreen() {
           </div>
         </div>
       ) : null}
-      {settledBills.length > 0 ? (
-        <div>
-          <div className="space-y-1">
-            <CardTitle>Settled bills</CardTitle>
-            <CardDescription>Mocked history for now.</CardDescription>
-          </div>
-          <div className="space-y-2 mt-3">
-            {settledBills.map((bill) => (
-              <BillRow
-                key={bill.id}
-                bill={bill}
-                onView={() => navigate({ to: `/bills/${bill.id}` })}
-              />
-            ))}
-          </div>
-        </div>
+      {!bills.length ? (
+        <Card className="rounded-lg border p-4">
+          <CardTitle className="text-base">
+            {isLoadingHistory ? "Loading bills..." : "No bills yet"}
+          </CardTitle>
+          <CardDescription className="mt-1">
+            {isLoadingHistory
+              ? "Fetching your bill history."
+              : "Create a new bill to get started."}
+          </CardDescription>
+        </Card>
       ) : null}
     </div>
   );

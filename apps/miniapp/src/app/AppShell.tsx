@@ -14,7 +14,7 @@ export function AppShell() {
   const navigate = useNavigate();
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-4xl p-4 md:p-8 space-y-6">
+    <main className="mx-auto min-h-screen w-full max-w-md p-4 space-y-6">
       <Outlet />
     </main>
   );

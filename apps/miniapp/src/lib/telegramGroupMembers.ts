@@ -74,6 +74,39 @@ export function parseStartParamHasCid(raw: string | undefined): boolean {
   }
 }
 
+/** Telegram group chat id from bot `start_param` JSON/base64 JSON (`cid`). */
+export function parseTelegramChatIdFromStartParam(
+  raw: string | undefined,
+): string | null {
+  if (!raw?.trim()) return null;
+  const trimmed = raw.trim();
+
+  const tryParse = (s: string): string | null => {
+    try {
+      const parsed: unknown = JSON.parse(s);
+      if (parsed && typeof parsed === "object" && "cid" in parsed) {
+        const v = (parsed as { cid?: unknown }).cid;
+        if (v != null && String(v).trim() !== "") return String(v).trim();
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  };
+
+  const direct = tryParse(trimmed);
+  if (direct) return direct;
+
+  try {
+    const pad =
+      trimmed.length % 4 === 0 ? "" : "=".repeat(4 - (trimmed.length % 4));
+    const decoded = atob(trimmed.replace(/-/g, "+").replace(/_/g, "/") + pad);
+    return tryParse(decoded);
+  } catch {
+    return null;
+  }
+}
+
 export function parseMembersFromStartParam(raw: string | undefined): string[] | null {
   if (!raw?.trim()) return null;
   const trimmed = raw.trim();

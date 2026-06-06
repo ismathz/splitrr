@@ -1,8 +1,17 @@
 import { Database } from "bun:sqlite";
-import { schemaMigrations, v1InitialSchema } from "./schema";
+import {
+  schemaMigrations,
+  v1InitialSchema,
+  v2BillSessionDatePlace,
+  v3BillCurrency,
+  v4MemberPaymentStatus,
+} from "./schema";
 
 const orderedMigrations: Array<{ name: string; sql: string }> = [
-  { name: "001_initial_schema.sql", sql: v1InitialSchema }
+  { name: "001_initial_schema.sql", sql: v1InitialSchema },
+  { name: "002_bill_date_place.sql", sql: v2BillSessionDatePlace },
+  { name: "003_bill_currency.sql", sql: v3BillCurrency },
+  { name: "004_member_payment_status.sql", sql: v4MemberPaymentStatus },
 ];
 
 export function applyMigrations(db: Database): void {

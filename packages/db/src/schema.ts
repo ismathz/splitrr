@@ -120,3 +120,31 @@ CREATE INDEX IF NOT EXISTS idx_assignments_item
 CREATE INDEX IF NOT EXISTS idx_settlements_session_status
   ON settlements(bill_session_id, status);
 `;
+
+/** Adds when/where metadata for each bill session. */
+export const v2BillSessionDatePlace = `
+ALTER TABLE bill_sessions ADD COLUMN bill_date TEXT NOT NULL DEFAULT (date('now'));
+ALTER TABLE bill_sessions ADD COLUMN place TEXT;
+`;
+
+/** ISO 4217 currency for display and settlement (OCR or user-chosen for manual bills). */
+export const v3BillCurrency = `
+ALTER TABLE bill_sessions ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD';
+`;
+
+/** Persist per-member manual paid status for split checklist UI. */
+export const v4MemberPaymentStatus = `
+CREATE TABLE IF NOT EXISTS bill_member_payment_status (
+  id TEXT PRIMARY KEY,
+  bill_session_id TEXT NOT NULL,
+  member_name TEXT NOT NULL,
+  paid INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (bill_session_id, member_name),
+  FOREIGN KEY (bill_session_id) REFERENCES bill_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_member_payment_status_bill
+  ON bill_member_payment_status(bill_session_id);
+`;
