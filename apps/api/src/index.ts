@@ -7,7 +7,10 @@ import type { ParsedReceipt, ParsedReceiptAdjustment } from "@splitbot/shared";
 import { env } from "./env";
 import { StorageService } from "./storage";
 import { OpenAiOcrProvider } from "./ocr";
-import { allocateCentsByWeight } from "./splitter";
+import { requireCronSecret, requireTelegramAuth } from "./auth";
+import { RateLimiter } from "./rateLimit";
+import { validateReceiptFile } from "./receiptValidation";
+import { computeSettlementTransfers } from "./settlement";
 
 const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
@@ -22,6 +25,18 @@ const storage = new StorageService({
 });
 const ocr = new OpenAiOcrProvider(env.OPENAI_API_KEY, env.OPENAI_MODEL);
 const OCR_MIN_ITEM_CONFIDENCE = 0.6;
+
+const uploadLimiter = new RateLimiter(20, 20 / 60);
+const ocrLimiter = new RateLimiter(10, 10 / 60);
+
+function clientKey(c: { req: { header: (n: string) => string | undefined } }): string {
+  return (
+    c.req.header("cf-connecting-ip") ||
+    c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
+    c.req.header("x-real-ip") ||
+    "unknown"
+  );
+}
 
 function validateAndSanitizeParsedReceipt(parsed: ParsedReceipt):
   | { ok: true; receipt: ParsedReceipt }
@@ -79,23 +94,41 @@ function validateAndSanitizeParsedReceipt(parsed: ParsedReceipt):
 
 const app = new Hono();
 
+const corsOrigin = env.TELEGRAM_WEBAPP_URL
+  ? env.TELEGRAM_WEBAPP_URL.replace(/\/$/, "")
+  : env.SPLITBOT_DEV_AUTH_BYPASS
+    ? "*"
+    : undefined;
+
 app.use(
   "/api/*",
   cors({
-    origin: "*",
+    origin: corsOrigin ?? "http://localhost:5173",
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type"],
-  }),
+    allowHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Telegram-Init-Data",
+      "X-Cron-Secret"
+    ],
+    credentials: false
+  })
 );
 
-app.options("/api/*", (c) => {
-  c.header("Access-Control-Allow-Origin", "*");
-  c.header("Access-Control-Allow-Headers", "Content-Type");
-  c.header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
-  return c.body(null, 204);
+app.onError((err, c) => {
+  console.error("[api]", err);
+  return c.json({ error: "internal_error" }, 500);
 });
 
 app.get("/health", (c) => c.json({ ok: true }));
+
+app.use("/api/reminders/*", requireCronSecret);
+app.use("/api/*", async (c, next) => {
+  if (c.req.path.startsWith("/api/reminders/")) {
+    return next();
+  }
+  return requireTelegramAuth(c, next);
+});
 
 app.post("/api/bills", async (c) => {
   const body = await c.req.json<{
@@ -112,13 +145,14 @@ app.post("/api/bills", async (c) => {
 
   const groupId = groups.upsertGroup(body.telegramChatId, body.groupTitle);
   const billId = randomUUID();
+  const authUser = c.get("telegramUser");
 
   sessions.create({
     id: billId,
     groupId,
     title: body.title,
     status: "draft",
-    createdByUserId: body.createdByUserId,
+    createdByUserId: body.createdByUserId ?? authUser?.id,
     billDate: body.billDate,
     place: body.place ?? null,
     currency: body.currency
@@ -128,6 +162,10 @@ app.post("/api/bills", async (c) => {
 });
 
 app.post("/api/bills/:billId/receipt", async (c) => {
+  if (!uploadLimiter.take(`upload:${clientKey(c)}`)) {
+    return c.json({ error: "rate_limited" }, 429);
+  }
+
   const billId = c.req.param("billId");
   const formData = await c.req.formData();
   const file = formData.get("file");
@@ -136,9 +174,14 @@ app.post("/api/bills/:billId/receipt", async (c) => {
     return c.json({ error: "file is required" }, 400);
   }
 
+  const validatedFile = validateReceiptFile(file);
+  if (!validatedFile.ok) {
+    return c.json({ error: validatedFile.message }, 400);
+  }
+
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const key = `${billId}/${Date.now()}-${file.name}`;
-  const stored = await storage.putObject(key, bytes, file.type || "image/jpeg");
+  const key = `${billId}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
+  const stored = await storage.putObject(key, bytes, validatedFile.mime);
   const signedUrl = await storage.getSignedUrl(stored.key);
 
   db.query(
@@ -151,46 +194,117 @@ app.post("/api/bills/:billId/receipt", async (c) => {
 });
 
 app.post("/api/bills/:billId/ocr", async (c) => {
-  const billId = c.req.param("billId");
-  const body = await c.req.json<{ imageUrl: string }>();
-  const parsed = await ocr.parseReceiptFromImageUrl(body.imageUrl);
-  const validated = validateAndSanitizeParsedReceipt(parsed);
-  if (!validated.ok) {
-    return c.json({ error: validated.message }, 422);
+  if (!ocrLimiter.take(`ocr:${clientKey(c)}`)) {
+    return c.json({ error: "rate_limited" }, 429);
   }
 
-  const receipt = validated.receipt;
-  sessions.updateCurrency(billId, receipt.currency);
+  const billId = c.req.param("billId");
+  let body: { storageKey?: string; imageUrl?: string } = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    body = {};
+  }
 
-  for (const item of receipt.items) {
-    db.query(
-      `INSERT INTO bill_items (id, bill_session_id, name, qty, unit_price_cents, total_price_cents, confidence)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
-    ).run(
-      randomUUID(),
-      billId,
-      item.name,
-      item.qty,
-      item.unitPriceCents,
-      item.totalPriceCents,
-      item.confidence
+  let storageKey = typeof body.storageKey === "string" ? body.storageKey.trim() : "";
+  if (!storageKey) {
+    const latest = db
+      .query(
+        `SELECT storage_key FROM receipt_images
+         WHERE bill_session_id = ?1
+         ORDER BY created_at DESC LIMIT 1`
+      )
+      .get(billId) as { storage_key: string } | null;
+    storageKey = latest?.storage_key ?? "";
+  }
+
+  if (!storageKey || !storage.isOwnedKey(storageKey)) {
+    return c.json(
+      {
+        error:
+          "Upload a receipt first. OCR only accepts storageKey from this environment (imageUrl is not allowed)."
+      },
+      400
     );
   }
 
-  if (receipt.taxCents) {
-    db.query(
-      `INSERT INTO charges (id, bill_session_id, charge_type, amount_cents) VALUES (?1, ?2, 'tax', ?3)`
-    ).run(randomUUID(), billId, receipt.taxCents);
-  }
+  const receiptRow = db
+    .query(
+      `SELECT id FROM receipt_images
+       WHERE bill_session_id = ?1 AND storage_key = ?2
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(billId, storageKey) as { id: string } | null;
 
-  if (receipt.tipCents) {
-    db.query(
-      `INSERT INTO charges (id, bill_session_id, charge_type, amount_cents) VALUES (?1, ?2, 'tip', ?3)`
-    ).run(randomUUID(), billId, receipt.tipCents);
-  }
+  try {
+    const signedUrl = await storage.getSignedUrl(storageKey, 120);
+    const parsed = await ocr.parseReceiptFromImageUrl(signedUrl);
+    const validated = validateAndSanitizeParsedReceipt(parsed);
+    if (!validated.ok) {
+      if (receiptRow) {
+        db.query(
+          `UPDATE receipt_images SET ocr_status = 'failed' WHERE id = ?1`
+        ).run(receiptRow.id);
+      }
+      return c.json({ error: validated.message }, 422);
+    }
 
-  sessions.updateStatus(billId, "draft");
-  return c.json(receipt);
+    const receipt = validated.receipt;
+    sessions.updateCurrency(billId, receipt.currency);
+
+    for (const item of receipt.items) {
+      db.query(
+        `INSERT INTO bill_items (id, bill_session_id, name, qty, unit_price_cents, total_price_cents, confidence)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
+      ).run(
+        randomUUID(),
+        billId,
+        item.name,
+        item.qty,
+        item.unitPriceCents,
+        item.totalPriceCents,
+        item.confidence
+      );
+    }
+
+    if (receipt.taxCents) {
+      db.query(
+        `INSERT INTO charges (id, bill_session_id, charge_type, amount_cents) VALUES (?1, ?2, 'tax', ?3)`
+      ).run(randomUUID(), billId, receipt.taxCents);
+    }
+
+    if (receipt.tipCents) {
+      db.query(
+        `INSERT INTO charges (id, bill_session_id, charge_type, amount_cents) VALUES (?1, ?2, 'tip', ?3)`
+      ).run(randomUUID(), billId, receipt.tipCents);
+    }
+
+    for (const discount of receipt.discountAdjustments ?? []) {
+      db.query(
+        `INSERT INTO charges (id, bill_session_id, charge_type, amount_cents) VALUES (?1, ?2, 'discount', ?3)`
+      ).run(randomUUID(), billId, discount.amountCents);
+    }
+
+    if (receiptRow) {
+      db.query(
+        `UPDATE receipt_images SET ocr_status = 'done' WHERE id = ?1`
+      ).run(receiptRow.id);
+    }
+
+    sessions.updateStatus(billId, "draft");
+    return c.json(receipt);
+  } catch (err) {
+    if (receiptRow) {
+      db.query(
+        `UPDATE receipt_images SET ocr_status = 'failed' WHERE id = ?1`
+      ).run(receiptRow.id);
+    }
+    console.error("[ocr]", err);
+    return c.json(
+      { error: "OCR failed. Try a clearer photo or add items manually." },
+      502
+    );
+  }
 });
 
 app.post("/api/bills/:billId/assignments", async (c) => {
@@ -393,8 +507,52 @@ app.delete("/api/bills/:billId", (c) => {
   return c.json({ ok: true });
 });
 
-app.post("/api/bills/:billId/settlements/compute", (c) => {
+app.post("/api/bills/:billId/settlements/compute", async (c) => {
   const billId = c.req.param("billId");
+  let body: { paidByUserId?: number } = {};
+  try {
+    body = await c.req.json<{ paidByUserId?: number }>();
+  } catch {
+    body = {};
+  }
+  const authUser = c.get("telegramUser");
+  const paidByUserId =
+    typeof body.paidByUserId === "number" && Number.isFinite(body.paidByUserId)
+      ? body.paidByUserId
+      : authUser?.id;
+
+  if (typeof paidByUserId !== "number" || !Number.isFinite(paidByUserId)) {
+    return c.json(
+      { error: "paidByUserId is required (who paid the merchant)" },
+      400
+    );
+  }
+
+  // Resolve Telegram user id → internal users.id when needed
+  let payerInternalId = paidByUserId;
+  const byPk = db
+    .query("SELECT id FROM users WHERE id = ?1")
+    .get(paidByUserId) as { id: number } | null;
+  if (!byPk) {
+    const byTg = db
+      .query("SELECT id FROM users WHERE telegram_user_id = ?1")
+      .get(String(paidByUserId)) as { id: number } | null;
+    if (byTg) {
+      payerInternalId = byTg.id;
+    } else {
+      const inserted = db
+        .query(
+          `INSERT INTO users (telegram_user_id, first_name)
+           VALUES (?1, ?2)
+           RETURNING id`
+        )
+        .get(String(paidByUserId), authUser?.first_name ?? "Payer") as {
+        id: number;
+      };
+      payerInternalId = inserted.id;
+    }
+  }
+
   db.query("DELETE FROM settlements WHERE bill_session_id = ?1").run(billId);
 
   const items = db
@@ -412,53 +570,27 @@ app.post("/api/bills/:billId/settlements/compute", (c) => {
     weight: number | null;
   }>;
 
-  const balances = new Map<number, number>();
-  const grouped = new Map<string, typeof items>();
-  for (const row of items) {
-    if (!grouped.has(row.itemId)) grouped.set(row.itemId, []);
-    grouped.get(row.itemId)?.push(row);
-  }
+  const charges = db
+    .query(
+      `SELECT amount_cents AS amountCents FROM charges WHERE bill_session_id = ?1`
+    )
+    .all(billId) as Array<{ amountCents: number }>;
 
-  for (const rows of grouped.values()) {
-    const total = rows[0].totalPriceCents;
-    const members = rows
-      .filter((r) => r.userId !== null)
-      .map((r) => ({ userId: r.userId as number, weight: r.weight ?? 1 }));
+  const transfers = computeSettlementTransfers({
+    items,
+    charges,
+    paidByUserId: payerInternalId
+  });
 
-    const allocation = allocateCentsByWeight({ itemTotalCents: total, members });
-    for (const [userId, owed] of allocation.entries()) {
-      balances.set(userId, (balances.get(userId) ?? 0) + owed);
-    }
-  }
-
-  const debtors: Array<{ userId: number; amount: number }> = [];
-  const creditors: Array<{ userId: number; amount: number }> = [];
-
-  for (const [userId, amount] of balances) {
-    if (amount > 0) debtors.push({ userId, amount });
-    else if (amount < 0) creditors.push({ userId, amount: -amount });
-  }
-
-  let i = 0;
-  let j = 0;
-  while (i < debtors.length && j < creditors.length) {
-    const debtor = debtors[i];
-    const creditor = creditors[j];
-    const transfer = Math.min(debtor.amount, creditor.amount);
-
+  for (const t of transfers) {
     db.query(
       `INSERT INTO settlements (id, bill_session_id, payer_user_id, payee_user_id, amount_cents)
        VALUES (?1, ?2, ?3, ?4, ?5)`
-    ).run(randomUUID(), billId, debtor.userId, creditor.userId, transfer);
-
-    debtor.amount -= transfer;
-    creditor.amount -= transfer;
-    if (debtor.amount === 0) i += 1;
-    if (creditor.amount === 0) j += 1;
+    ).run(randomUUID(), billId, t.payerUserId, t.payeeUserId, t.amountCents);
   }
 
   sessions.updateStatus(billId, "active");
-  return c.json({ ok: true });
+  return c.json({ ok: true, transfers: transfers.length });
 });
 
 app.post("/api/settlements/:settlementId/paid", (c) => {
@@ -541,6 +673,8 @@ app.get("/api/bills/:billId/payment-status", (c) => {
       name,
       paid: paidByName.get(name) ?? false,
     })),
+    /** Honor-system checklist — not payment-processor settlement. */
+    trackingMode: "manual_checklist" as const,
   });
 });
 
@@ -671,22 +805,96 @@ app.get("/api/bills/:billId/export.csv", (c) => {
   });
 });
 
-app.post("/api/reminders/run", (c) => {
+app.post("/api/reminders/run", async (c) => {
   const pending = db
     .query(
-      `SELECT id, bill_session_id, payer_user_id, payee_user_id, amount_cents
-       FROM settlements WHERE status = 'pending'`
+      `SELECT s.id, s.bill_session_id, s.payer_user_id, s.payee_user_id, s.amount_cents,
+              pu.telegram_user_id AS payer_tg,
+              pe.telegram_user_id AS payee_tg,
+              bs.title AS bill_title,
+              bs.currency AS currency
+       FROM settlements s
+       JOIN users pu ON pu.id = s.payer_user_id
+       JOIN users pe ON pe.id = s.payee_user_id
+       JOIN bill_sessions bs ON bs.id = s.bill_session_id
+       WHERE s.status = 'pending'`
     )
-    .all();
+    .all() as Array<{
+    id: string;
+    bill_session_id: string;
+    payer_user_id: number;
+    payee_user_id: number;
+    amount_cents: number;
+    payer_tg: string;
+    payee_tg: string;
+    bill_title: string;
+    currency: string;
+  }>;
 
-  for (const row of pending as Array<{ bill_session_id: string } & Record<string, unknown>>) {
-    db.query(
-      `INSERT INTO activity_events (id, bill_session_id, event_type, payload_json)
-       VALUES (?1, ?2, 'reminder_sent', ?3)`
-    ).run(randomUUID(), row.bill_session_id, JSON.stringify(row));
+  let sent = 0;
+  const token = env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    return c.json({ error: "TELEGRAM_BOT_TOKEN required for reminders" }, 503);
   }
 
-  return c.json({ remindersQueued: pending.length });
+  for (const row of pending) {
+    const amount = (row.amount_cents / 100).toFixed(2);
+    const text =
+      `Splitbot reminder: you still owe ${row.currency} ${amount} ` +
+      `for “${row.bill_title}”. Mark paid in the Mini App when settled.`;
+
+    const chatId = row.payer_tg;
+    // Skip synthetic name: users
+    if (!chatId || chatId.startsWith("name:") || chatId.startsWith("web-")) {
+      db.query(
+        `INSERT INTO activity_events (id, bill_session_id, event_type, payload_json)
+         VALUES (?1, ?2, 'reminder_skipped', ?3)`
+      ).run(
+        randomUUID(),
+        row.bill_session_id,
+        JSON.stringify({ settlementId: row.id, reason: "non_telegram_user" })
+      );
+      continue;
+    }
+
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text,
+          disable_notification: false
+        })
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error("[reminder]", chatId, errText);
+        db.query(
+          `INSERT INTO activity_events (id, bill_session_id, event_type, payload_json)
+           VALUES (?1, ?2, 'reminder_failed', ?3)`
+        ).run(
+          randomUUID(),
+          row.bill_session_id,
+          JSON.stringify({ settlementId: row.id, status: res.status })
+        );
+        continue;
+      }
+      sent += 1;
+      db.query(
+        `INSERT INTO activity_events (id, bill_session_id, event_type, payload_json)
+         VALUES (?1, ?2, 'reminder_sent', ?3)`
+      ).run(
+        randomUUID(),
+        row.bill_session_id,
+        JSON.stringify({ settlementId: row.id, payer_tg: chatId })
+      );
+    } catch (err) {
+      console.error("[reminder]", err);
+    }
+  }
+
+  return c.json({ remindersQueued: pending.length, remindersSent: sent });
 });
 
 await storage.assertBucketAccess();

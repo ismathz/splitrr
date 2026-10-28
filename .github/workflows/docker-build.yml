@@ -31,6 +31,9 @@ jobs:
 
       - name: Docker Compose build
         working-directory: .build
+        env:
+          VITE_SPLITBOT_API: ${{ vars.VITE_SPLITBOT_API }}
+          VITE_BOT_MINIAPP_API: ${{ vars.VITE_BOT_MINIAPP_API }}
         run: docker compose -f compose.yml build
 
       - name: Docker Compose push

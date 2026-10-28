@@ -72,6 +72,15 @@ export class StorageService {
     );
   }
 
+  /** True when `key` is under this service's configured prefix (rejects arbitrary URLs/keys). */
+  isOwnedKey(key: string): boolean {
+    const normalized = key.replace(/^\/+/, "");
+    if (!this.keyPrefix) return normalized.length > 0 && !normalized.includes("..");
+    return (
+      normalized.startsWith(`${this.keyPrefix}/`) && !normalized.includes("..")
+    );
+  }
+
   async assertBucketAccess(): Promise<void> {
     await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
   }

@@ -487,14 +487,14 @@ export function BillEditor(props: BillEditorProps) {
           place: null,
         });
         setServerBillId(billId);
-        const { signedUrl } = await uploadReceipt(
+        const { key: storageKey } = await uploadReceipt(
           splitbotApiBase,
           billId,
           receiptFile,
         );
         if (cancelled) return;
         setOcrPhase("scanning");
-        const parsed = await runReceiptOcr(splitbotApiBase, billId, signedUrl);
+        const parsed = await runReceiptOcr(splitbotApiBase, billId, storageKey);
         if (cancelled) return;
         setCurrencyCode(normalizeCurrencyCode(parsed.currency));
         setItems(
