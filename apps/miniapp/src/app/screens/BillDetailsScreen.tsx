@@ -552,7 +552,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
             <CardTitle className="text-xl">Split breakdown</CardTitle>
             <CardDescription>
               {membersOrdered.length > 0
-                ? `Mark who has paid their share (${paidCount} of ${membersOrdered.length}).`
+                ? `Manual checklist — mark who settled their share (${paidCount} of ${membersOrdered.length}). Not a payment processor.`
                 : "Assign people to items to start tracking payments."}
             </CardDescription>
           </div>

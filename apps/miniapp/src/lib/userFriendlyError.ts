@@ -48,10 +48,10 @@ export function toUserFriendlyErrorMessage(
     if (parsed && typeof parsed === "object") {
       const o = parsed as Record<string, unknown>;
       if (typeof o.message === "string" && o.message.trim()) {
-        return sanitizeApiMessage(o.message.trim());
+        return sanitizeApiMessage(o.message.trim()) ?? fallback;
       }
       if (typeof o.error === "string" && o.error.trim()) {
-        return sanitizeApiMessage(o.error.trim());
+        return sanitizeApiMessage(o.error.trim()) ?? fallback;
       }
     }
   } catch {

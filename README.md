@@ -49,7 +49,8 @@ Telegram Bill Splitter built with Bun + TypeScript.
 - Apply key prefixes by environment (`receipts/dev`, `receipts/staging`, `receipts/prod`) to simplify retention and cleanup.
 
 ### Security Controls
-- Telegram webhook path includes a secret token.
-- Mini App requests must be verified with Telegram init-data signature checks (to implement in auth middleware).
-- Receipt objects should be private and served through short-lived signed URLs.
-- Enforce file-size/type validation before storage and OCR.
+- Telegram webhook path includes a secret token (optional matching `X-Telegram-Bot-Api-Secret-Token` header).
+- Mini App → API auth: `X-Telegram-Init-Data` verified with Telegram HMAC + `auth_date` freshness (`SPLITBOT_DEV_AUTH_BYPASS` for local only).
+- Receipt objects are private and served through short-lived signed URLs; OCR uses owned storage keys only (no arbitrary `imageUrl`).
+- Upload MIME/size validation and in-memory rate limits on receipt upload + OCR.
+- Reminder cron protected by `REMINDER_CRON_SECRET`.

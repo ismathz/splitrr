@@ -9,7 +9,7 @@
     "dev:api": "bun run --cwd apps/api dev",
     "dev:bot": "bun run --cwd apps/bot dev",
     "dev:miniapp": "bun run --cwd apps/miniapp dev",
-    "test": "bun test",
+    "test": "bun test apps packages",
     "lint": "bunx tsc -b --pretty"
   },
   "devDependencies": {
