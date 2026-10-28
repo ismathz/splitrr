@@ -50,6 +50,8 @@ jobs:
           script_stop: true
           command_timeout: 20m
           # Verified live redeploy recipe (VPS Admin). Do not alter steps.
+          # reset --hard discards local mods to tracked files on purpose.
+          # Untracked data/ (sqlite) and .env survive (gitignored; no git clean).
           # Does not touch .env or cloudflared-splitbot.
           script: |
             export XDG_RUNTIME_DIR=/run/user/$(id -u)

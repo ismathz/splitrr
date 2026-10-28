@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Manual / on-box mirror of the verified VPS Admin redeploy recipe.
 # GitHub Actions inlines the same steps via appleboy/ssh-action (see deploy-vps.yml).
+# reset --hard discards local mods to tracked files on purpose.
+# Untracked data/ (sqlite) and .env survive (gitignored; this script never runs git clean).
 # Does not overwrite .env. Does not restart cloudflared-splitbot. Not Docker.
 set -euo pipefail
 

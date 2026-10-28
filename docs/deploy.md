@@ -14,26 +14,28 @@ It runs after **CI** succeeds on a **push to `main`**, or via **`workflow_dispat
 | `VPS_SSH_PRIVATE_KEY` | CI→VPS private key (PEM). **Do not commit.** |
 | `VPS_SSH_PORT` | Optional; default `22` |
 
-### One-time VPS setup (before first auto-deploy)
+### VPS git / deploy-key status (verified)
 
-1. **Actions pubkey → `authorized_keys`**  
-   Append the public half of `VPS_SSH_PRIVATE_KEY` to `~ismath/.ssh/authorized_keys`.
+- `origin` is `git@github.com-splitbot:ismathz/splitbot.git` — `git fetch origin main` works.
+- Deploy key `splitbot-deploy@srv1495393` is on the GitHub repo (read-only).
+- Checkout on the VPS is **behind** `origin/main`; the first deploy’s `git reset --hard origin/main` will move it forward.
 
-2. **Git remote must use the deploy key** (host alias `github.com-splitbot` → `~/.ssh/splitbot_deploy`):
-   ```bash
-   # ~/.ssh/config excerpt (already expected on the VPS):
-   # Host github.com-splitbot
-   #   HostName github.com
-   #   User git
-   #   IdentityFile ~/.ssh/splitbot_deploy
-   #   IdentitiesOnly yes
+### Still required before first auto-deploy
 
-   cd ~/apps/splitbot
-   git remote -v
-   # If origin still uses github.com, retarget:
-   git remote set-url origin git@github.com-splitbot:ismathz/splitbot.git
-   # Or one-shot: GIT_SSH_COMMAND='ssh -i ~/.ssh/splitbot_deploy -o IdentitiesOnly=yes' git fetch
-   ```
+**Actions pubkey → `authorized_keys`** (out of band): append the public half of `VPS_SSH_PRIVATE_KEY` to `~ismath/.ssh/authorized_keys`. Auto-deploy cannot SSH in until this is done.
+
+### `git reset --hard` — intentional discard of local mods
+
+The deploy recipe runs `git fetch origin main && git reset --hard origin/main`.
+
+| Path | Survives reset? | Notes |
+| --- | --- | --- |
+| Modified **tracked** files on the VPS | **No — discarded on purpose** | VPS Admin reported a dirty tree; first deploy will wipe those local edits so the box matches `main`. Do not keep prod-only fixes only as uncommitted VPS edits. |
+| Untracked `data/` (SQLite) | **Yes** | `data/` is in `.gitignore`; `reset --hard` does not remove untracked files. Deploy never runs `git clean`. |
+| Untracked `.env` | **Yes** | `.env` / `.env.*` are gitignored; deploy never overwrites `.env`. |
+| `cloudflared-splitbot` | N/A | Never restarted by this workflow. |
+
+If you need to preserve a local VPS edit, commit it on a branch or copy it aside **before** the first auto-deploy.
 
 ### Redeploy recipe (verified)
 
