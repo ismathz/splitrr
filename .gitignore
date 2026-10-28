@@ -5,6 +5,9 @@ node_modules
 .env
 .env.*
 !.env.example
+# VPS SQLite / local runtime data (must stay untracked so deploy reset --hard leaves it alone)
+data/
+**/data/
 *.db
 *.db-shm
 *.db-wal

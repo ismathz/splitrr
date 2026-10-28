@@ -1,0 +1,72 @@
+# Deploy Splitbot to Hostinger VPS (Bun + systemd --user). NOT Docker.
+# Leaves .github/workflows/docker-build.yml alone; does not restart cloudflared-splitbot.
+#
+# GitHub Actions secrets (exact names):
+#   VPS_HOST              — e.g. <your-vps-ip>
+#   VPS_USER              — e.g. ismath
+#   VPS_SSH_PRIVATE_KEY   — CI→VPS private key (PEM); pubkey in ~ismath/.ssh/authorized_keys
+#   VPS_SSH_PORT          — optional; default 22
+#
+# Never put real key material in the repo. Never deploy from pull_request.
+
+name: Deploy VPS
+
+on:
+  # After CI completes on main (push). Branches filter excludes PR-head CI runs.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  deploy:
+    name: SSH redeploy
+    runs-on: ubuntu-latest
+    # Manual always; workflow_run only when CI succeeded on a push to main.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main'
+      )
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT || 22 }}
+          script_stop: true
+          command_timeout: 20m
+          # Verified live redeploy recipe (VPS Admin). Do not alter steps.
+          # reset --hard discards local mods to tracked files on purpose.
+          # Untracked data/ (sqlite) and .env survive (gitignored; no git clean).
+          # Does not touch .env or cloudflared-splitbot.
+          script: |
+            export XDG_RUNTIME_DIR=/run/user/$(id -u)
+            export PATH="$HOME/.bun/bin:$PATH"
+            cd "$HOME/apps/splitbot"
+            git fetch origin main && git reset --hard origin/main
+            bun install
+            cd apps/miniapp
+            VITE_SPLITBOT_API=https://splitrr.ismath.dev \
+            VITE_BOT_MINIAPP_API=https://splitrr.ismath.dev \
+            bun run build
+            cd ../..
+            systemctl --user restart splitbot-api splitbot-bot splitbot-static
+            systemctl --user is-active splitbot-api splitbot-bot splitbot-static
+
+      - name: Smoke health (optional)
+        continue-on-error: true
+        run: curl -fsS https://splitrr.ismath.dev/health

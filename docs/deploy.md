@@ -1,12 +1,76 @@
 # Deploy Notes
 
+## GitHub Actions → Hostinger VPS (production)
+
+Production is **Bun + systemd --user**, not Docker. Workflow: `.github/workflows/deploy-vps.yml`.
+It runs after **CI** succeeds on a **push to `main`**, or via **`workflow_dispatch`**. It never deploys from PRs.
+
+### Actions secrets (exact names)
+
+| Secret | Example / notes |
+| --- | --- |
+| `VPS_HOST` | `<your-vps-ip>` |
+| `VPS_USER` | `ismath` |
+| `VPS_SSH_PRIVATE_KEY` | CI→VPS private key (PEM). **Do not commit.** |
+| `VPS_SSH_PORT` | Optional; default `22` |
+
+### VPS git / deploy-key status (verified)
+
+- `origin` is `git@github.com-splitbot:ismathz/splitbot.git` — `git fetch origin main` works.
+- Deploy key `splitbot-deploy@srv1495393` is on the GitHub repo (read-only).
+- Checkout on the VPS is **behind** `origin/main`; the first deploy’s `git reset --hard origin/main` will move it forward.
+
+### Still required before first auto-deploy
+
+**Actions pubkey → `authorized_keys`** (out of band): append the public half of `VPS_SSH_PRIVATE_KEY` to `~ismath/.ssh/authorized_keys`. Auto-deploy cannot SSH in until this is done.
+
+### `git reset --hard` — intentional discard of local mods
+
+The deploy recipe runs `git fetch origin main && git reset --hard origin/main`.
+
+| Path | Survives reset? | Notes |
+| --- | --- | --- |
+| Modified **tracked** files on the VPS | **No — discarded on purpose** | VPS Admin reported a dirty tree; first deploy will wipe those local edits so the box matches `main`. Do not keep prod-only fixes only as uncommitted VPS edits. |
+| Untracked `data/` (SQLite) | **Yes** | `data/` is in `.gitignore`; `reset --hard` does not remove untracked files. Deploy never runs `git clean`. |
+| Untracked `.env` | **Yes** | `.env` / `.env.*` are gitignored; deploy never overwrites `.env`. |
+| `cloudflared-splitbot` | N/A | Never restarted by this workflow. |
+
+If you need to preserve a local VPS edit, commit it on a branch or copy it aside **before** the first auto-deploy.
+
+### Redeploy recipe (verified)
+
+Always sets `XDG_RUNTIME_DIR` (required for non-interactive `systemctl --user`).  
+Uses VPS Bun at `~/.bun/bin` (currently 1.4.2). Does **not** overwrite `.env`. Does **not** restart `cloudflared-splitbot`.
+
+```bash
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+export PATH="$HOME/.bun/bin:$PATH"
+cd "$HOME/apps/splitbot"
+git fetch origin main && git reset --hard origin/main
+bun install
+cd apps/miniapp
+VITE_SPLITBOT_API=https://splitrr.ismath.dev \
+VITE_BOT_MINIAPP_API=https://splitrr.ismath.dev \
+bun run build
+cd ../..
+systemctl --user restart splitbot-api splitbot-bot splitbot-static
+systemctl --user is-active splitbot-api splitbot-bot splitbot-static
+```
+
+Optional smoke: `curl -fsS https://splitrr.ismath.dev/health`
+
+Units restarted: `splitbot-api` (:3000), `splitbot-bot` (:3001), `splitbot-static` (:8787).  
+Public URL: https://splitrr.ismath.dev (Cloudflare Tunnel via `cloudflared-splitbot`).
+
 ## VPS Layout
-- `apps/api` running as systemd service (or Docker) on port `3000`
+- `apps/api` running as systemd service on port `3000`
 - `apps/bot` webhook server on port `3001`
-- reverse proxy (Caddy/Nginx) exposing HTTPS routes
+- `splitbot-static` serves the Mini App build on port `8787`
+- Cloudflare Tunnel (`cloudflared-splitbot`) exposes https://splitrr.ismath.dev
 - SQLite DB path on persistent volume, e.g. `/var/lib/splitbot/splitbot.db`
 - Cloudflare R2 credentials set in env (`S3_*`) and validated on API startup
 - Production env: `NODE_ENV=production`, `SPLITBOT_DEV_AUTH_BYPASS` unset/false, `TELEGRAM_BOT_TOKEN` set
+- Runtime `.env` on the VPS is operator-managed; deploys must not overwrite it
 
 ## Telegram webhook
 Register the webhook (path includes secret; also pass the same value as `secret_token`):
