@@ -33,6 +33,37 @@ export function getSplitbotApiBase(): string {
   return "";
 }
 
+/** Latest Telegram.WebApp.initData for API auth (empty outside Telegram). */
+export function getTelegramInitData(): string {
+  try {
+    const wa = (
+      window as Window & {
+        Telegram?: { WebApp?: { initData?: string } };
+      }
+    ).Telegram?.WebApp;
+    return wa?.initData?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function authHeaders(extra?: HeadersInit): Headers {
+  const headers = new Headers(extra);
+  const initData = getTelegramInitData();
+  if (initData) {
+    headers.set("X-Telegram-Init-Data", initData);
+  }
+  return headers;
+}
+
+async function apiFetch(
+  input: string,
+  init?: RequestInit,
+): Promise<Response> {
+  const headers = authHeaders(init?.headers);
+  return fetch(input, { ...init, headers });
+}
+
 export function resolveBillContextForApi(
   ctx: TelegramLaunchContext,
 ): { telegramChatId: string; groupTitle: string } | null {
@@ -90,7 +121,7 @@ export async function createBillSession(
     currency?: string;
   },
 ): Promise<{ billId: string; groupId: number }> {
-  const res = await fetch(`${base}/api/bills`, {
+  const res = await apiFetch(`${base}/api/bills`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -106,10 +137,10 @@ export async function uploadReceipt(
   base: string,
   billId: string,
   file: File,
-): Promise<{ signedUrl: string }> {
+): Promise<{ key: string; signedUrl: string }> {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch(`${base}/api/bills/${billId}/receipt`, {
+  const res = await apiFetch(`${base}/api/bills/${billId}/receipt`, {
     method: "POST",
     body: fd,
   });
@@ -117,18 +148,18 @@ export async function uploadReceipt(
     const t = await res.text();
     throw new Error(t || `upload receipt failed: ${res.status}`);
   }
-  return res.json() as Promise<{ signedUrl: string }>;
+  return res.json() as Promise<{ key: string; signedUrl: string }>;
 }
 
 export async function runReceiptOcr(
   base: string,
   billId: string,
-  imageUrl: string,
+  storageKey?: string,
 ): Promise<ParsedReceipt> {
-  const res = await fetch(`${base}/api/bills/${billId}/ocr`, {
+  const res = await apiFetch(`${base}/api/bills/${billId}/ocr`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ imageUrl }),
+    body: JSON.stringify(storageKey ? { storageKey } : {}),
   });
   if (!res.ok) {
     const t = await res.text();
@@ -183,7 +214,7 @@ export async function getGroupHistoryByTelegramChatId(
     query ? `?${query}` : ""
   }`;
 
-  const res = await fetch(url);
+  const res = await apiFetch(url);
   if (!res.ok) {
     const t = await res.text();
     throw new Error(t || `get group history failed: ${res.status}`);
@@ -195,7 +226,7 @@ export async function getBillDetails(
   base: string,
   billId: string,
 ): Promise<ApiBillDetails> {
-  const res = await fetch(`${base}/api/bills/${billId}`);
+  const res = await apiFetch(`${base}/api/bills/${billId}`);
   if (!res.ok) {
     const t = await res.text();
     throw new Error(t || `get bill failed: ${res.status}`);
@@ -218,7 +249,7 @@ export async function updateBillDetails(
     }>;
   },
 ): Promise<{ ok: true }> {
-  const res = await fetch(`${base}/api/bills/${billId}`, {
+  const res = await apiFetch(`${base}/api/bills/${billId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -231,7 +262,7 @@ export async function updateBillDetails(
 }
 
 export async function deleteBill(base: string, billId: string): Promise<{ ok: true }> {
-  const res = await fetch(`${base}/api/bills/${billId}`, {
+  const res = await apiFetch(`${base}/api/bills/${billId}`, {
     method: "DELETE",
   });
   if (!res.ok) {
@@ -245,7 +276,7 @@ export async function getBillPaymentStatus(
   base: string,
   billId: string,
 ): Promise<{ members: ApiBillPaymentStatusMember[] }> {
-  const res = await fetch(`${base}/api/bills/${billId}/payment-status`);
+  const res = await apiFetch(`${base}/api/bills/${billId}/payment-status`);
   if (!res.ok) {
     const t = await res.text();
     throw new Error(t || `get payment status failed: ${res.status}`);
@@ -258,7 +289,7 @@ export async function updateBillPaymentStatus(
   billId: string,
   body: { name: string; paid: boolean },
 ): Promise<{ ok: true }> {
-  const res = await fetch(`${base}/api/bills/${billId}/payment-status`, {
+  const res = await apiFetch(`${base}/api/bills/${billId}/payment-status`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -268,4 +299,23 @@ export async function updateBillPaymentStatus(
     throw new Error(t || `update payment status failed: ${res.status}`);
   }
   return res.json() as Promise<{ ok: true }>;
+}
+
+export async function computeBillSettlements(
+  base: string,
+  billId: string,
+  paidByUserId?: number,
+): Promise<{ ok: true; transfers: number }> {
+  const res = await apiFetch(`${base}/api/bills/${billId}/settlements/compute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(
+      typeof paidByUserId === "number" ? { paidByUserId } : {},
+    ),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(t || `compute settlements failed: ${res.status}`);
+  }
+  return res.json() as Promise<{ ok: true; transfers: number }>;
 }

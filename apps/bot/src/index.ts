@@ -206,7 +206,7 @@ bot.on("message:photo", async (ctx) => {
   const direct = directMiniAppLink(startPayload);
 
   await ctx.reply(
-    `Receipt captured for bill ${latest.id}. Open Mini App to review OCR and assignments.`,
+    `Got your photo for bill ${latest.id}. Open the Mini App to upload/scan the receipt (group photos are not auto-OCR’d yet).`,
     {
       reply_markup: buildOpenMiniAppReplyMarkup({
         chatType: chat.type,
@@ -299,7 +299,16 @@ app.post("/miniapp/group-members", async (c) => {
   }
 });
 
-app.post(`/webhook/${env.TELEGRAM_WEBHOOK_SECRET}`, webhookCallback(bot, "hono"));
+const handleTelegramWebhook = webhookCallback(bot, "hono");
+app.post(`/webhook/${env.TELEGRAM_WEBHOOK_SECRET}`, async (c) => {
+  // When setWebhook uses secret_token, Telegram sends this header. Accept either
+  // matching header or missing header (path secret still required).
+  const headerToken = c.req.header("x-telegram-bot-api-secret-token");
+  if (headerToken != null && headerToken !== env.TELEGRAM_WEBHOOK_SECRET) {
+    return c.json({ error: "invalid_secret_token" }, 401);
+  }
+  return handleTelegramWebhook(c);
+});
 app.get("/health", (c) => c.json({ ok: true }));
 
 await initMtcute();

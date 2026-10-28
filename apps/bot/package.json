@@ -9,6 +9,7 @@
     "@hono/node-server": "latest",
     "@mtcute/bun": "0.29.4",
     "@splitbot/db": "workspace:*",
+    "@splitbot/shared": "workspace:*",
     "grammy": "latest",
     "hono": "latest",
     "zod": "latest"
