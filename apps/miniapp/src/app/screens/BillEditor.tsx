@@ -57,7 +57,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
 
-import { type Item } from "../billMock";
+import { type Item } from "../billTypes";
 import {
   AUTO_FILL_MAX_GROUP_SIZE,
   parseStartParamHasCid,
@@ -385,11 +385,6 @@ export function BillEditor(props: BillEditorProps) {
   );
 
   const allowAutofillFromGroupContext = useMemo(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      if (params.has("members")) return true;
-    }
-    if (import.meta.env.VITE_TELEGRAM_GROUP_MEMBERS) return true;
     if (isGroupLikeLaunch(launchCtx)) return true;
     if (parseStartParamHasCid(launchCtx.startParam)) return true;
     return false;
@@ -464,7 +459,7 @@ export function BillEditor(props: BillEditorProps) {
     if (!billApiContext) {
       setOcrPhase("error");
       setOcrError(
-        "Could not start a bill session (missing browser context). Try again, or open the Mini App from Telegram if you use group features.",
+        "Open Splitbot from a Telegram group (via /newbill) so this bill can bind to that chat.",
       );
       return;
     }
@@ -2223,7 +2218,7 @@ export function BillEditor(props: BillEditorProps) {
             <p className="text-center text-xs text-muted-foreground">
               {!splitbotApiBase
                 ? "Set VITE_SPLITBOT_API to your Splitbot API URL (build-time) to save bills on the server."
-                : "Could not attach this session for saving. Open the Mini App from Telegram for group-linked bills, or ensure the page has access to storage."}
+                : "Open Splitbot from a Telegram group (via /newbill) so this bill can bind to that chat."}
             </p>
           ) : null}
           {isEditMode && !splitbotApiBase ? (
@@ -2350,13 +2345,9 @@ export function BillEditor(props: BillEditorProps) {
                   {import.meta.env.DEV ? (
                     <>
                       {" "}
-                      For testing:{" "}
+                      For local testing set{" "}
                       <code className="rounded bg-muted px-1 py-0.5 text-xs">
-                        ?members=Alice,Bob
-                      </code>{" "}
-                      or{" "}
-                      <code className="rounded bg-muted px-1 py-0.5 text-xs">
-                        VITE_TELEGRAM_GROUP_MEMBERS
+                        VITE_SPLITBOT_USE_MOCK_DATA=true
                       </code>
                       .
                     </>

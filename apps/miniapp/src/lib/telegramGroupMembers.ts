@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-import { mockMembers } from "@/app/billMock";
+import { mockMembers } from "@/app/billDevMocks";
+import { isDevMockDataEnabled } from "@/lib/devFlags";
 import {
   logTelegramInitDataOnce,
   readTelegramLaunchContext,
@@ -13,7 +14,7 @@ export type TelegramGroupMember = {
    * Telegram-provided placeholder background colors for profile-photo
    * fallback avatars (RGB24 ints).
    *
-   * When absent (start_param/env/dev mocks), the UI falls back to a local
+   * When absent (start_param / opt-in dev mocks), the UI falls back to a local
    * deterministic color from the name.
    */
   avatarBgColors?: number[];
@@ -146,19 +147,22 @@ export function parseMembersFromStartParam(raw: string | undefined): string[] | 
 function resolveTelegramGroupMembersSync(): TelegramGroupMember[] {
   if (typeof window === "undefined") return [];
 
-  const params = new URLSearchParams(window.location.search);
-  const membersParam = params.get("members");
-  if (membersParam) {
-    return dedupeNames(membersParam.split(",").map((s) => s.trim())).map((name) => ({
-      name
-    }));
-  }
+  // Query/env member overrides are local-dev only (never in production builds).
+  if (isDevMockDataEnabled()) {
+    const params = new URLSearchParams(window.location.search);
+    const membersParam = params.get("members");
+    if (membersParam) {
+      return dedupeNames(membersParam.split(",").map((s) => s.trim())).map(
+        (name) => ({ name }),
+      );
+    }
 
-  const env = import.meta.env.VITE_TELEGRAM_GROUP_MEMBERS;
-  if (typeof env === "string" && env.trim()) {
-    return dedupeNames(env.split(",").map((s) => s.trim())).map((name) => ({
-      name
-    }));
+    const env = import.meta.env.VITE_TELEGRAM_GROUP_MEMBERS;
+    if (typeof env === "string" && env.trim()) {
+      return dedupeNames(env.split(",").map((s) => s.trim())).map((name) => ({
+        name,
+      }));
+    }
   }
 
   logTelegramInitDataOnce();
@@ -169,7 +173,7 @@ function resolveTelegramGroupMembersSync(): TelegramGroupMember[] {
     return fromStart.map((name) => ({ name }));
   }
 
-  if (import.meta.env.DEV) {
+  if (isDevMockDataEnabled()) {
     return mockMembers.slice(0, 6).map((name) => ({ name }));
   }
 
@@ -249,8 +253,8 @@ export type UseTelegramGroupMembersResult = {
 };
 
 /**
- * Resolves group member display names: query/env → `start_param` → optional bot API
- * (`VITE_BOT_MINIAPP_API` + validated `initData`; server uses mtcute `iterChatMembers`, best-effort) → dev mocks.
+ * Resolves group member display names: bot API (mtcute) → `start_param` →
+ * opt-in DEV mocks (`VITE_SPLITBOT_USE_MOCK_DATA=true` only).
  */
 export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
   const [launch, setLaunch] = useState(() => readTelegramLaunchContext());
