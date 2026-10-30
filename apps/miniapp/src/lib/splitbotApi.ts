@@ -295,3 +295,20 @@ export async function computeBillSettlements(
   }
   return res.json() as Promise<{ ok: true; transfers: number }>;
 }
+
+/** Post a bill summary (+ reopen deep link) into the bound Telegram group. */
+export async function announceBillToGroup(
+  base: string,
+  billId: string,
+): Promise<{ ok: true; openUrl?: string | null }> {
+  const res = await apiFetch(`${base}/api/bills/${billId}/announce`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(t || `announce bill failed: ${res.status}`);
+  }
+  return res.json() as Promise<{ ok: true; openUrl?: string | null }>;
+}

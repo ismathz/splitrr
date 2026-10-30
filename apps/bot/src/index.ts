@@ -2,12 +2,16 @@ import { Bot, webhookCallback } from "grammy";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
-import { randomUUID } from "node:crypto";
-import { createDb, GroupRepository, BillSessionRepository } from "@splitbot/db";
+import { createDb, GroupRepository } from "@splitbot/db";
 import { signAvatarRequest, verifyAvatarRequest } from "./avatarSignature";
 import { env } from "./env";
 import { getSessionMembers, initMtcute, type TelegramGroupMember } from "./mtcuteClient";
-import { directMiniAppLink, webAppUrlWithStartParam } from "./miniAppUrl";
+import {
+  directMiniAppLink,
+  hasDirectMiniAppLinkConfig,
+  webAppUrlWithStartParam
+} from "./miniAppUrl";
+import { buildOpenMiniAppReplyMarkup } from "./openMiniAppMarkup";
 import {
   parseTelegramChatIdFromInitData,
   validateWebAppInitData
@@ -16,7 +20,6 @@ import {
 const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
-const sessions = new BillSessionRepository(db);
 
 const AVATAR_SIG_TTL_SEC = 3600;
 
@@ -43,85 +46,82 @@ function toPublicMembers(
   });
 }
 
-function buildOpenMiniAppReplyMarkup(input: {
-  chatType: "private" | "group" | "supergroup" | "channel";
-  miniUrl: string;
-  directUrl: string | null;
-}) {
-  // Telegram rejects InlineKeyboardButton.web_app in non-private chats.
-  if (input.chatType === "private") {
-    return {
-      inline_keyboard: [[{ text: "Open Mini App", web_app: { url: input.miniUrl } }]]
-    };
-  }
-
-  if (input.directUrl) {
-    return {
-      inline_keyboard: [[{ text: "Open Mini App", url: input.directUrl }]]
-    };
-  }
-
-  return undefined;
-}
+const DEEP_LINK_SETUP_HINT =
+  "Group deep links need TELEGRAM_BOT_USERNAME and TELEGRAM_MINI_APP_SHORT_NAME " +
+  "(BotFather Mini App short name) on the bot host. Ask the admin to set them and restart the bot.";
 
 bot.command("start", async (ctx) => {
-  const chatType = ctx.chat?.type ?? "private";
-  const baseMiniUrl = env.TELEGRAM_WEBAPP_URL;
-  const direct = directMiniAppLink({ cid: String(ctx.chat?.id ?? ctx.from?.id ?? "") });
+  const chat = ctx.chat;
+  const chatType = chat?.type ?? "private";
+  const startPayload = { cid: String(chat?.id ?? ctx.from?.id ?? "") };
+  const miniUrl = webAppUrlWithStartParam(startPayload);
+  const direct = directMiniAppLink(startPayload);
   const replyMarkup = buildOpenMiniAppReplyMarkup({
     chatType,
-    miniUrl: baseMiniUrl,
+    miniUrl,
     directUrl: direct
   });
 
   await ctx.reply(
-    "Splitbot is ready. Use /newbill in a group, then upload a receipt photo or open the Mini App.",
+    "Splitbot is ready. Use /split in a group (or here in DM) to open the Mini App, then scan a receipt or start an empty bill.",
     replyMarkup ? { reply_markup: replyMarkup } : undefined
   );
 });
 
 bot.command("help", async (ctx) => {
   await ctx.reply(
-    "Commands:\n/newbill - create bill session\n/history - latest bills\n/help - this message"
+    "Commands:\n/split - open Splitbot Mini App\n/history - latest bills\n/help - this message"
   );
 });
 
-bot.command("newbill", async (ctx) => {
+bot.command("split", async (ctx) => {
   const chat = ctx.chat;
-  if (!chat || !("title" in chat)) {
-    await ctx.reply("Use /newbill inside a group chat.");
+  if (!chat) {
+    await ctx.reply("Could not resolve this chat.");
     return;
   }
-
-  const groupId = groups.upsertGroup(String(chat.id), chat.title ?? "Untitled group");
-  const billId = randomUUID();
-
-  sessions.create({
-    id: billId,
-    groupId,
-    title: `Bill ${new Date().toISOString().slice(0, 10)}`,
-    status: "draft",
-    createdByUserId: undefined,
-    billDate: new Date().toISOString().slice(0, 10),
-    place: null
-  });
 
   const startPayload = { cid: String(chat.id) };
   const miniUrl = webAppUrlWithStartParam(startPayload);
   const direct = directMiniAppLink(startPayload);
-  const lines = [
-    `Bill created: ${billId}`,
-    "Upload a receipt photo next.",
-    direct ? `Open in Telegram: ${direct}` : ""
-  ].filter(Boolean);
 
-  await ctx.reply(lines.join("\n"), {
-    reply_markup: buildOpenMiniAppReplyMarkup({
-      chatType: chat.type,
-      miniUrl,
-      directUrl: direct
-    })
-  });
+  // Group / supergroup: upsert group only — bills are created in the Mini App.
+  if (chat.type === "group" || chat.type === "supergroup") {
+    groups.upsertGroup(String(chat.id), "title" in chat ? (chat.title ?? "Untitled group") : "Untitled group");
+
+    if (!hasDirectMiniAppLinkConfig() || !direct) {
+      await ctx.reply(
+        `Cannot open Splitbot in this group yet.\n${DEEP_LINK_SETUP_HINT}`
+      );
+      return;
+    }
+
+    await ctx.reply(
+      "Open Splitbot to create or continue a bill for this chat.",
+      {
+        reply_markup: buildOpenMiniAppReplyMarkup({
+          chatType: chat.type,
+          miniUrl,
+          directUrl: direct
+        })
+      }
+    );
+    return;
+  }
+
+  // Private / DM: web_app button (Telegram allows this only in private chats).
+  if (chat.type === "private") {
+    await ctx.reply("Open Splitbot to create or continue a bill.", {
+      reply_markup: buildOpenMiniAppReplyMarkup({
+        chatType: "private",
+        miniUrl,
+        directUrl: direct
+      })
+    });
+    return;
+  }
+
+  await ctx.reply("Use /split in a group or in a private chat with the bot.");
 });
 
 bot.command("history", async (ctx) => {
@@ -136,7 +136,7 @@ bot.command("history", async (ctx) => {
     .get(String(chat.id)) as { id: number } | null;
 
   if (!row) {
-    await ctx.reply("No bills yet. Use /newbill first.");
+    await ctx.reply("No bills yet. Use /split first.");
     return;
   }
 
@@ -158,7 +158,7 @@ bot.command("history", async (ctx) => {
   }>;
 
   if (!bills.length) {
-    await ctx.reply("No bills yet. Use /newbill first.");
+    await ctx.reply("No bills yet. Use /split first.");
     return;
   }
 
@@ -184,7 +184,7 @@ bot.on("message:photo", async (ctx) => {
     .get(String(chat.id)) as { id: number } | null;
 
   if (!group) {
-    await ctx.reply("Run /newbill first.");
+    await ctx.reply("Use /split to open Splitbot, then scan or upload the receipt there.");
     return;
   }
 
@@ -196,24 +196,36 @@ bot.on("message:photo", async (ctx) => {
     )
     .get(group.id) as { id: string } | null;
 
-  if (!latest) {
-    await ctx.reply("Run /newbill first.");
-    return;
-  }
-
   const startPayload = { cid: String(chat.id) };
   const miniUrl = webAppUrlWithStartParam(startPayload);
   const direct = directMiniAppLink(startPayload);
+  const replyMarkup = buildOpenMiniAppReplyMarkup({
+    chatType: chat.type,
+    miniUrl,
+    directUrl: direct
+  });
+
+  if (!latest) {
+    const setupMissing = (chat.type === "group" || chat.type === "supergroup") && !direct;
+    await ctx.reply(
+      setupMissing
+        ? `Got your photo. Open Splitbot with /split to scan it (group photos are not auto-OCR’d yet).\n${DEEP_LINK_SETUP_HINT}`
+        : "Got your photo. Open Splitbot to scan or upload the receipt (group photos are not auto-OCR’d yet).",
+      replyMarkup ? { reply_markup: replyMarkup } : undefined
+    );
+    return;
+  }
+
+  if ((chat.type === "group" || chat.type === "supergroup") && !direct) {
+    await ctx.reply(
+      `Got your photo for bill ${latest.id}. Open Splitbot with /split to upload/scan the receipt (group photos are not auto-OCR’d yet).\n${DEEP_LINK_SETUP_HINT}`
+    );
+    return;
+  }
 
   await ctx.reply(
-    `Got your photo for bill ${latest.id}. Open the Mini App to upload/scan the receipt (group photos are not auto-OCR’d yet).`,
-    {
-      reply_markup: buildOpenMiniAppReplyMarkup({
-        chatType: chat.type,
-        miniUrl,
-        directUrl: direct
-      })
-    }
+    `Got your photo for bill ${latest.id}. Open Splitbot to upload/scan the receipt (group photos are not auto-OCR’d yet).`,
+    replyMarkup ? { reply_markup: replyMarkup } : undefined
   );
 });
 

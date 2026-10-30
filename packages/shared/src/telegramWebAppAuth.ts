@@ -89,6 +89,34 @@ export function parseTelegramUserFromInitData(
   }
 }
 
+export type StartParamPayload = { cid: string; members?: string[] };
+
+/** Base64url JSON for `tgWebAppStartParam` / `start_param` / `startapp`. */
+export function encodeStartParamPayload(payload: StartParamPayload): string {
+  let json = JSON.stringify(payload);
+  if (json.length > 1800) {
+    json = JSON.stringify({ cid: payload.cid });
+  }
+  return Buffer.from(json, "utf8").toString("base64url");
+}
+
+/**
+ * Direct Mini App link: `https://t.me/<bot>/<short_name>?startapp=<payload>`.
+ * Returns null if username/short name missing or startapp exceeds Telegram’s 512 limit.
+ */
+export function buildDirectMiniAppLink(input: {
+  botUsername: string | undefined | null;
+  shortName: string | undefined | null;
+  payload: StartParamPayload;
+}): string | null {
+  const user = input.botUsername?.trim().replace(/^@/, "");
+  const app = input.shortName?.trim();
+  if (!user || !app) return null;
+  const startapp = encodeStartParamPayload(input.payload);
+  if (startapp.length > 512) return null;
+  return `https://t.me/${user}/${app}?startapp=${startapp}`;
+}
+
 export function parseTelegramChatIdFromInitData(initData: string): string | null {
   let params: URLSearchParams;
   try {
@@ -113,7 +141,8 @@ export function parseTelegramChatIdFromInitData(initData: string): string | null
   return null;
 }
 
-function parseChatIdFromStartParam(raw: string): string | null {
+/** Decode `cid` from start_param / startapp (JSON or base64url JSON). */
+export function parseChatIdFromStartParam(raw: string): string | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
 

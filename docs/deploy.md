@@ -81,7 +81,20 @@ curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
   -d "{\"url\":\"https://<host>/webhook/${TELEGRAM_WEBHOOK_SECRET}\",\"secret_token\":\"${TELEGRAM_WEBHOOK_SECRET}\"}"
 ```
 
-Point BotFather Mini App URL at the HTTPS Mini App origin (`TELEGRAM_WEBAPP_URL`).
+Point BotFather Mini App URL at the HTTPS Mini App origin (`TELEGRAM_WEBAPP_URL`, production: `https://splitrr.ismath.dev`).
+
+### BotFather + deep-link env (required for `/split` in groups)
+
+| Env (VPS `.env`, bot + API) | Example | Notes |
+| --- | --- | --- |
+| `TELEGRAM_BOT_USERNAME` | `SplitrrBot` | No `@`. Defaults to `SplitrrBot` if unset. |
+| `TELEGRAM_MINI_APP_SHORT_NAME` | `app` | Must match BotFather Mini App **short name** (path in `t.me/SplitrrBot/<short_name>`). Defaults to `app`; set explicitly if BotFather uses another name. |
+
+BotFather checklist:
+1. Mini App URL = `https://splitrr.ismath.dev` — note the short name.
+2. `/setcommands` (groups + default): `split`, `history`, `help` — remove `newbill`.
+3. Menu Button → same Mini App URL.
+4. Restart bot/API after changing `.env` (deploy does not overwrite `.env`).
 
 ## Mini App build
 Bake API bases at Vite build time (same as the VPS redeploy recipe):
