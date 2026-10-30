@@ -39,12 +39,15 @@ import { ArrowLeftIcon, EllipsisVertical } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "@/lib/utils";
 import {
+  announceBillToGroup,
   deleteBill,
   getBillDetails,
   getBillPaymentStatus,
   getSplitbotApiBase,
+  resolveBillContextForApi,
   updateBillPaymentStatus,
 } from "@/lib/splitbotApi";
+import { useTelegramLaunchContext } from "@/lib/telegramLaunchContext";
 import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
 
 function getInitials(name: string) {
@@ -142,6 +145,24 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
   const [isEditMode, setIsEditMode] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const splitbotApiBase = useMemo(() => getSplitbotApiBase(), []);
+  const launchCtx = useTelegramLaunchContext();
+  const billApiContext = useMemo(
+    () => resolveBillContextForApi(launchCtx),
+    [
+      launchCtx.chat?.id,
+      launchCtx.chat?.title,
+      launchCtx.startParam,
+      launchCtx.chatType,
+      launchCtx.currentUser?.id,
+    ],
+  );
+  const canShareToGroup = useMemo(() => {
+    const cid = billApiContext?.telegramChatId;
+    if (!cid) return false;
+    // Telegram group/supergroup ids are negative; private DMs use the user id.
+    const n = Number(cid);
+    return Number.isFinite(n) ? n < 0 : cid.startsWith("-");
+  }, [billApiContext?.telegramChatId]);
   const mockBill = useMemo(
     () =>
       isDevMockDataEnabled()
@@ -231,6 +252,11 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isDeletingBill, setIsDeletingBill] = useState(false);
   const [deleteBillError, setDeleteBillError] = useState<string | null>(null);
+  const [isAnnouncing, setIsAnnouncing] = useState(false);
+  const [announceError, setAnnounceError] = useState<string | null>(null);
+  const [announceToastMessage, setAnnounceToastMessage] = useState<
+    string | null
+  >(null);
 
   const togglePaid = async (name: string, next: boolean) => {
     setPaymentStatusError(null);
@@ -332,6 +358,35 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
       setIsDeletingBill(false);
     }
   };
+
+  const handleShareToGroup = async () => {
+    if (!splitbotApiBase) {
+      setAnnounceError("Share is only available when connected to the API.");
+      return;
+    }
+    setAnnounceError(null);
+    setIsAnnouncing(true);
+    try {
+      await announceBillToGroup(splitbotApiBase, billId);
+      setAnnounceToastMessage("Shared to the group.");
+    } catch (e) {
+      const message = toUserFriendlyErrorMessage(e);
+      setAnnounceError(message);
+      setAnnounceToastMessage(message);
+    } finally {
+      setIsAnnouncing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!announceToastMessage) return;
+    const timeoutId = window.setTimeout(() => {
+      setAnnounceToastMessage(null);
+    }, 3500);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [announceToastMessage]);
 
   if (isLoadingBill) {
     return (
@@ -438,6 +493,17 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
             Edit
           </Button>
 
+          {canShareToGroup && splitbotApiBase ? (
+            <Button
+              variant="outline"
+              onClick={handleShareToGroup}
+              disabled={isAnnouncing}
+              className="w-max"
+            >
+              {isAnnouncing ? "Sharing..." : "Share to group"}
+            </Button>
+          ) : null}
+
           <div className="ml-auto">
             <Popover
               open={isActionsPopoverOpen}
@@ -469,6 +535,9 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
             </Popover>
           </div>
         </div>
+        {announceError ? (
+          <p className="text-sm text-destructive">{announceError}</p>
+        ) : null}
       </div>
 
       <div className="space-y-4">
@@ -655,13 +724,18 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
         </DialogContent>
       </Dialog>
 
-      {paymentToastMessage ? (
+      {paymentToastMessage || announceToastMessage ? (
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-4 left-1/2 z-50 w-[min(92vw,28rem)] -translate-x-1/2 rounded-lg border border-destructive/30 bg-background px-3 py-2 text-sm text-destructive shadow-lg"
+          className={`fixed bottom-4 left-1/2 z-50 w-[min(92vw,28rem)] -translate-x-1/2 rounded-lg border bg-background px-3 py-2 text-sm shadow-lg ${
+            paymentToastMessage ||
+            (announceToastMessage && announceToastMessage !== "Shared to the group.")
+              ? "border-destructive/30 text-destructive"
+              : "border-border text-foreground"
+          }`}
         >
-          {paymentToastMessage}
+          {paymentToastMessage ?? announceToastMessage}
         </div>
       ) : null}
     </div>

@@ -1,15 +1,12 @@
+import {
+  buildDirectMiniAppLink,
+  encodeStartParamPayload,
+  type StartParamPayload
+} from "@splitbot/shared";
 import { env } from "./env";
 
-export type StartParamPayload = { cid: string; members?: string[] };
-
-/** Base64url JSON for `tgWebAppStartParam` / `start_param`. */
-export function encodeStartParamPayload(payload: StartParamPayload): string {
-  let json = JSON.stringify(payload);
-  if (json.length > 1800) {
-    json = JSON.stringify({ cid: payload.cid });
-  }
-  return Buffer.from(json, "utf8").toString("base64url");
-}
+export type { StartParamPayload };
+export { encodeStartParamPayload };
 
 /** Mini App URL with `tgWebAppStartParam` so the client gets `cid` (+ optional members). */
 export function webAppUrlWithStartParam(payload: StartParamPayload): string {
@@ -18,12 +15,18 @@ export function webAppUrlWithStartParam(payload: StartParamPayload): string {
   return u.toString();
 }
 
-/** Optional direct link (only if BotFather short name + username are configured). */
+/** Direct link `t.me/<bot>/<app>?startapp=` (uses env username + short name). */
 export function directMiniAppLink(payload: StartParamPayload): string | null {
-  const user = env.TELEGRAM_BOT_USERNAME;
-  const app = env.TELEGRAM_MINI_APP_SHORT_NAME;
-  if (!user || !app) return null;
-  const startapp = encodeStartParamPayload(payload);
-  if (startapp.length > 512) return null;
-  return `https://t.me/${user}/${app}?startapp=${startapp}`;
+  return buildDirectMiniAppLink({
+    botUsername: env.TELEGRAM_BOT_USERNAME,
+    shortName: env.TELEGRAM_MINI_APP_SHORT_NAME,
+    payload
+  });
+}
+
+/** True when both deep-link env pieces resolve to non-empty strings. */
+export function hasDirectMiniAppLinkConfig(): boolean {
+  return Boolean(
+    env.TELEGRAM_BOT_USERNAME?.trim() && env.TELEGRAM_MINI_APP_SHORT_NAME?.trim()
+  );
 }

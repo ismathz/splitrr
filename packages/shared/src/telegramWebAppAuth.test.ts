@@ -1,6 +1,9 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "bun:test";
 import {
+  buildDirectMiniAppLink,
+  encodeStartParamPayload,
+  parseChatIdFromStartParam,
   parseTelegramChatIdFromInitData,
   parseTelegramUserFromInitData,
   validateWebAppInitData
@@ -80,5 +83,51 @@ describe("parse helpers", () => {
     }).toString();
     expect(parseTelegramUserFromInitData(initData)?.id).toBe(7);
     expect(parseTelegramChatIdFromInitData(initData)).toBe("-1001");
+  });
+
+  it("round-trips encodeStartParamPayload cid", () => {
+    const encoded = encodeStartParamPayload({ cid: "-1001234567890" });
+    expect(parseChatIdFromStartParam(encoded)).toBe("-1001234567890");
+  });
+
+  it("prefers chat.id over start_param", () => {
+    const initData = new URLSearchParams({
+      chat: JSON.stringify({ id: -55, title: "Dinner" }),
+      start_param: encodeStartParamPayload({ cid: "-99" })
+    }).toString();
+    expect(parseTelegramChatIdFromInitData(initData)).toBe("-55");
+  });
+});
+
+describe("buildDirectMiniAppLink", () => {
+  it("builds t.me deep link", () => {
+    const payload = { cid: "-1001" };
+    const url = buildDirectMiniAppLink({
+      botUsername: "SplitrrBot",
+      shortName: "app",
+      payload
+    });
+    expect(url).toBe(
+      `https://t.me/SplitrrBot/app?startapp=${encodeStartParamPayload(payload)}`
+    );
+  });
+
+  it("strips leading @ from username", () => {
+    const url = buildDirectMiniAppLink({
+      botUsername: "@SplitrrBot",
+      shortName: "app",
+      payload: { cid: "1" }
+    });
+    expect(url?.startsWith("https://t.me/SplitrrBot/app?startapp=")).toBe(true);
+  });
+
+  it("returns null when short name missing", () => {
+    expect(
+      buildDirectMiniAppLink({
+        botUsername: "SplitrrBot",
+        shortName: "",
+        payload: { cid: "1" }
+      })
+    ).toBeNull();
   });
 });

@@ -11,6 +11,12 @@ import { requireCronSecret, requireTelegramAuth } from "./auth";
 import { RateLimiter } from "./rateLimit";
 import { validateReceiptFile } from "./receiptValidation";
 import { computeSettlementTransfers } from "./settlement";
+import {
+  authorizeBillAnnounce,
+  buildBillAnnounceOpenUrl,
+  formatBillAnnounceMessage,
+  type BillAnnounceRow
+} from "./announce";
 
 const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
@@ -505,6 +511,106 @@ app.delete("/api/bills/:billId", (c) => {
   }
 
   return c.json({ ok: true });
+});
+
+app.post("/api/bills/:billId/announce", async (c) => {
+  const billId = c.req.param("billId");
+  const token = env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    return c.json({ error: "TELEGRAM_BOT_TOKEN required for announce" }, 503);
+  }
+
+  const bill = db
+    .query(
+      `SELECT bs.id AS billId, bs.title AS title, bs.status AS status,
+              bs.currency AS currency, bs.bill_date AS billDate, bs.place AS place,
+              g.telegram_chat_id AS telegramChatId
+       FROM bill_sessions bs
+       JOIN groups g ON g.id = bs.group_id
+       WHERE bs.id = ?1`
+    )
+    .get(billId) as BillAnnounceRow | null;
+
+  if (!bill) {
+    return c.json({ error: "Bill not found" }, 404);
+  }
+
+  if (!bill.telegramChatId?.trim()) {
+    return c.json({ error: "group_chat_missing" }, 400);
+  }
+
+  const authUser = c.get("telegramUser");
+  const auth = authorizeBillAnnounce(bill, {
+    authMode: c.get("authMode"),
+    initData: c.get("initData"),
+    telegramUserId: authUser?.id ?? null
+  });
+  if (!auth.ok) {
+    return c.json({ error: auth.error }, auth.status);
+  }
+
+  const totals = db
+    .query(
+      `SELECT COUNT(*) AS itemCount,
+              COALESCE(SUM(total_price_cents), 0) AS totalCents
+       FROM bill_items
+       WHERE bill_session_id = ?1`
+    )
+    .get(billId) as { itemCount: number; totalCents: number };
+
+  const openUrl = buildBillAnnounceOpenUrl({
+    botUsername: env.TELEGRAM_BOT_USERNAME,
+    shortName: env.TELEGRAM_MINI_APP_SHORT_NAME,
+    telegramChatId: bill.telegramChatId
+  });
+
+  const text = formatBillAnnounceMessage(bill, {
+    itemCount: Number(totals.itemCount) || 0,
+    totalCents: Number(totals.totalCents) || 0,
+    openUrl
+  });
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: bill.telegramChatId,
+        text,
+        disable_web_page_preview: true
+      })
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("[announce]", bill.telegramChatId, errText);
+      db.query(
+        `INSERT INTO activity_events (id, bill_session_id, event_type, payload_json)
+         VALUES (?1, ?2, 'announce_failed', ?3)`
+      ).run(
+        randomUUID(),
+        billId,
+        JSON.stringify({ status: res.status, body: errText.slice(0, 500) })
+      );
+      return c.json({ error: "telegram_send_failed" }, 502);
+    }
+
+    db.query(
+      `INSERT INTO activity_events (id, bill_session_id, event_type, payload_json)
+       VALUES (?1, ?2, 'announce_sent', ?3)`
+    ).run(
+      randomUUID(),
+      billId,
+      JSON.stringify({
+        telegramChatId: bill.telegramChatId,
+        byUserId: authUser?.id ?? null
+      })
+    );
+
+    return c.json({ ok: true, openUrl });
+  } catch (err) {
+    console.error("[announce]", err);
+    return c.json({ error: "telegram_send_failed" }, 502);
+  }
 });
 
 app.post("/api/bills/:billId/settlements/compute", async (c) => {

@@ -32,6 +32,10 @@ const envSchema = z
     S3_KEY_PREFIX: z.string().default("receipts"),
     TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
     TELEGRAM_WEBAPP_URL: z.string().url().optional(),
+    /** Bot username without `@` for announce deep links (default @SplitrrBot). */
+    TELEGRAM_BOT_USERNAME: z.string().min(1).default("SplitrrBot"),
+    /** BotFather Mini App short name for announce deep links. */
+    TELEGRAM_MINI_APP_SHORT_NAME: z.string().min(1).default("app"),
     /** Allow unauthenticated API calls (local Mini App / curl only). */
     SPLITBOT_DEV_AUTH_BYPASS: boolFromEnv,
     /** Shared secret for POST /api/reminders/run */

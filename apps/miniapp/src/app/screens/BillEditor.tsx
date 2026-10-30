@@ -459,7 +459,7 @@ export function BillEditor(props: BillEditorProps) {
     if (!billApiContext) {
       setOcrPhase("error");
       setOcrError(
-        "Open Splitbot from a Telegram group (via /newbill) so this bill can bind to that chat.",
+        "Open Splitbot from a Telegram group (via /split) so this bill can bind to that chat.",
       );
       return;
     }
@@ -2218,7 +2218,7 @@ export function BillEditor(props: BillEditorProps) {
             <p className="text-center text-xs text-muted-foreground">
               {!splitbotApiBase
                 ? "Set VITE_SPLITBOT_API to your Splitbot API URL (build-time) to save bills on the server."
-                : "Open Splitbot from a Telegram group (via /newbill) so this bill can bind to that chat."}
+                : "Open Splitbot from a Telegram group (via /split) so this bill can bind to that chat."}
             </p>
           ) : null}
           {isEditMode && !splitbotApiBase ? (

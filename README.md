@@ -14,7 +14,7 @@ Telegram Bill Splitter built with Bun + TypeScript.
 ## Architecture
 
 ### Components
-- **Bot webhook (`apps/bot`)**: Receives Telegram updates, supports `/newbill`, `/history`, and receipt image intake in groups.
+- **Bot webhook (`apps/bot`)**: Receives Telegram updates, supports `/split` (opens Mini App), `/history`, and receipt image intake nudges in groups.
 - **API (`apps/api`)**: Hono service for bill CRUD, OCR processing, assignments, settlement computation, reminders, and CSV export.
 - **Mini App (`apps/miniapp`)**: Telegram Web App UI for receipt review, assignment, summary, and settlement screens.
 - **SQLite (`bun:sqlite`)**: Core transactional data (`users`, `groups`, `bill_sessions`, `bill_items`, `item_assignments`, `charges`, `settlements`, `activity_events`, `schema_migrations`).
@@ -22,12 +22,12 @@ Telegram Bill Splitter built with Bun + TypeScript.
 - **OpenAI OCR**: Vision parsing through structured JSON schema for receipt extraction.
 
 ### Receipt Flow
-1. Group member runs `/newbill` in Telegram group.
-2. Receipt photo is uploaded in group or Mini App.
+1. Group member runs `/split` in Telegram group and opens the Mini App (deep link with chat id).
+2. From Mini App home: Scan / Upload / Start empty — bill session is created when the user acts (not by the slash command).
 3. Backend stores file in Cloudflare R2 (under `S3_KEY_PREFIX`) and tracks metadata in `receipt_images`.
 4. OCR endpoint calls OpenAI Vision and writes parsed line-items into `bill_items` and extra fees into `charges`.
 5. Members assign line-items via Mini App; assignments persist in `item_assignments`.
-6. Settlement engine computes balances/transfers into `settlements`.
+6. Settlement engine computes balances/transfers into `settlements`; optional **Share to group** announces a summary back into the chat.
 7. Reminder and history endpoints read from settlement/activity tables.
 
 ### VPS Deployment Shape
