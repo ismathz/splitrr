@@ -84,12 +84,13 @@ curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
 Point BotFather Mini App URL at the HTTPS Mini App origin (`TELEGRAM_WEBAPP_URL`).
 
 ## Mini App build
-Bake API bases at image build time:
+Bake API bases at Vite build time (same as the VPS redeploy recipe):
 
 ```bash
+cd apps/miniapp
 VITE_SPLITBOT_API=https://api.example.com \
 VITE_BOT_MINIAPP_API=https://bot.example.com \
-  docker compose -f .build/compose.yml build miniapp
+  bun run build
 ```
 
 ## Auth
