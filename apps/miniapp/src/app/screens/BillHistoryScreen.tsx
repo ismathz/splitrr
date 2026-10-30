@@ -12,9 +12,10 @@ import {
 import { useTelegramLaunchContext } from "@/lib/telegramLaunchContext";
 import {
   formatBillDateLabel,
-  mockBills,
   type BillDetails,
-} from "../billMock";
+} from "../billTypes";
+import { mockBills } from "../billDevMocks";
+import { isDevMockDataEnabled } from "@/lib/devFlags";
 
 const billStatusBadgeClass: Record<BillDetails["status"], string> = {
   draft: "bg-sky-500/15 text-sky-700",
@@ -116,7 +117,9 @@ export function BillHistoryScreen() {
     };
   }, [splitbotApiBase, billApiContext, launchCtx.currentUser?.id]);
 
-  const bills = serverBills ?? mockBills;
+  const bills =
+    serverBills ?? (isDevMockDataEnabled() ? mockBills : []);
+  const showingDevMocks = isDevMockDataEnabled() && serverBills == null;
 
   return (
     <div className="space-y-4">
@@ -124,7 +127,9 @@ export function BillHistoryScreen() {
         <div className="space-y-1">
           <CardTitle>All bills</CardTitle>
           <CardDescription>
-            {serverBills ? "Full bill history for this chat." : "Mocked history for now."}
+            {showingDevMocks
+              ? "Dev mock history (VITE_SPLITBOT_USE_MOCK_DATA)."
+              : "Full bill history for this chat."}
           </CardDescription>
         </div>
         <Button variant="outline" size="sm" onClick={() => navigate({ to: "/" })}>
@@ -150,7 +155,11 @@ export function BillHistoryScreen() {
           <CardDescription className="mt-1">
             {isLoadingHistory
               ? "Fetching your bill history."
-              : "Create a new bill to get started."}
+              : !splitbotApiBase
+                ? "Connect to the API to load bills for this chat."
+                : !billApiContext
+                  ? "Open Splitbot from a Telegram group to see that chat’s bills."
+                  : "No bills in this chat yet."}
           </CardDescription>
         </Card>
       )}

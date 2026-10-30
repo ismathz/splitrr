@@ -3,29 +3,7 @@ import type { ParsedReceipt } from "@splitbot/shared";
 import type { TelegramLaunchContext } from "@/lib/telegramLaunchContext";
 import { parseTelegramChatIdFromStartParam } from "@/lib/telegramGroupMembers";
 
-const STANDALONE_WEB_CHAT_STORAGE_KEY = "splitbot_standalone_telegram_chat_id";
-
-let standaloneChatIdWithoutStorage: string | null = null;
-
-/** Stable per-browser id for bills created outside Telegram (hosted web, no Mini App). */
-function getOrCreateStandaloneWebTelegramChatId(): string {
-  try {
-    let id = localStorage.getItem(STANDALONE_WEB_CHAT_STORAGE_KEY);
-    if (!id?.trim()) {
-      id = `web-${crypto.randomUUID()}`;
-      localStorage.setItem(STANDALONE_WEB_CHAT_STORAGE_KEY, id);
-    }
-    return id.trim();
-  } catch {
-    // private mode / quota: one id for this page load
-    if (!standaloneChatIdWithoutStorage) {
-      standaloneChatIdWithoutStorage = `web-${crypto.randomUUID()}`;
-    }
-    return standaloneChatIdWithoutStorage;
-  }
-}
-
-/** Base URL for `apps/api` (bills + OCR). Set `VITE_SPLITBOT_API`; dev defaults to localhost:3000. */
+/** Base URL for `apps/api` (bills + OCR). Set `VITE_SPLITBOT_API`; DEV defaults to localhost:3000. */
 export function getSplitbotApiBase(): string {
   const v = import.meta.env.VITE_SPLITBOT_API?.replace(/\/$/, "") ?? "";
   if (v) return v;
@@ -77,9 +55,12 @@ export function resolveBillContextForApi(
   if (cid) {
     return { telegramChatId: cid, groupTitle: "Group" };
   }
-  const dev = import.meta.env.VITE_DEV_TELEGRAM_CHAT_ID;
-  if (typeof dev === "string" && dev.trim()) {
-    return { telegramChatId: dev.trim(), groupTitle: "Dev group" };
+  // Explicit local override — never honored in production builds.
+  if (import.meta.env.DEV) {
+    const dev = import.meta.env.VITE_DEV_TELEGRAM_CHAT_ID;
+    if (typeof dev === "string" && dev.trim()) {
+      return { telegramChatId: dev.trim(), groupTitle: "Dev group" };
+    }
   }
   // Private chat / Saved Messages: no `chat` object, but user id matches the DM chat id.
   const ct = ctx.chatType;
@@ -95,17 +76,12 @@ export function resolveBillContextForApi(
         : "Private chat",
     };
   }
-  // Vite dev server without Telegram WebApp: fixed id for local API testing.
+  // Vite DEV without Telegram WebApp: fixed id for local API testing.
   if (import.meta.env.DEV) {
     return { telegramChatId: "dev-local", groupTitle: "Local dev" };
   }
-  // Hosted or production web build: no Telegram; use a per-browser synthetic group.
-  if (typeof window !== "undefined") {
-    return {
-      telegramChatId: getOrCreateStandaloneWebTelegramChatId(),
-      groupTitle: "Web",
-    };
-  }
+  // Production Mini App outside a Telegram launch context: no chat to bind.
+  // (Standalone browser demos can still opt into DEV + mock flag locally.)
   return null;
 }
 

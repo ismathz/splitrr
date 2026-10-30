@@ -95,6 +95,7 @@ VITE_BOT_MINIAPP_API=https://bot.example.com \
 ## Auth
 - Mini App sends `X-Telegram-Init-Data` on every API call; API verifies Telegram HMAC + `auth_date`.
 - Reminders: `POST /api/reminders/run` with header `X-Cron-Secret: $REMINDER_CRON_SECRET`.
+- Never set `SPLITBOT_DEV_AUTH_BYPASS=true` or `VITE_SPLITBOT_USE_MOCK_DATA=true` for production builds. Mock bill/member fixtures are DEV-only and require the Vite flag.
 
 ## Nightly Backup
 - Schedule cron:
