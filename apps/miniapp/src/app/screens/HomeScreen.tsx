@@ -23,9 +23,10 @@ import {
 
 import {
   formatBillDateLabel,
-  mockBills,
   type BillDetails,
-} from "../billMock";
+} from "../billTypes";
+import { mockBills } from "../billDevMocks";
+import { isDevMockDataEnabled } from "@/lib/devFlags";
 import {
   getGroupHistoryByTelegramChatId,
   getSplitbotApiBase,
@@ -138,9 +139,11 @@ export function HomeScreen() {
     };
   }, [splitbotApiBase, billApiContext, launchCtx.currentUser?.id]);
 
-  const bills = serverBills ?? mockBills;
+  const bills =
+    serverBills ?? (isDevMockDataEnabled() ? mockBills : []);
   const billHistoryPreview = bills.slice(0, BILL_HISTORY_PREVIEW_LIMIT);
   const hasMoreBills = bills.length > BILL_HISTORY_PREVIEW_LIMIT;
+  const showingDevMocks = isDevMockDataEnabled() && serverBills == null;
 
   const goToNewBillScratch = () => {
     navigate({ to: "/new-bill", search: { source: "scratch" } });
@@ -246,7 +249,9 @@ export function HomeScreen() {
             <div className="space-y-1">
               <CardTitle>Bill history</CardTitle>
               <CardDescription>
-                {serverBills ? "Your recent bills." : "Mocked history for now."}
+                {showingDevMocks
+                  ? "Dev mock history (VITE_SPLITBOT_USE_MOCK_DATA)."
+                  : "Your recent bills."}
               </CardDescription>
             </div>
             {hasMoreBills ? (
@@ -278,7 +283,11 @@ export function HomeScreen() {
           <CardDescription className="mt-1">
             {isLoadingHistory
               ? "Fetching your bill history."
-              : "Create a new bill to get started."}
+              : !splitbotApiBase
+                ? "Connect to the API to load bills for this chat."
+                : !billApiContext
+                  ? "Open Splitbot from a Telegram group to see that chat’s bills."
+                  : "No bills in this chat yet. Scan a receipt or start empty."}
           </CardDescription>
         </Card>
       ) : null}

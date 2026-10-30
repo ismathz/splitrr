@@ -22,10 +22,11 @@ import { Toggle } from "@/components/ui/toggle";
 
 import {
   formatBillDateLabel,
-  mockBills,
   type BillDetails,
   type Item,
-} from "../billMock";
+} from "../billTypes";
+import { mockBills } from "../billDevMocks";
+import { isDevMockDataEnabled } from "@/lib/devFlags";
 import { BillEditor } from "./BillEditor";
 
 const billStatusBadgeClass: Record<BillDetails["status"], string> = {
@@ -142,7 +143,10 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
   const [reloadToken, setReloadToken] = useState(0);
   const splitbotApiBase = useMemo(() => getSplitbotApiBase(), []);
   const mockBill = useMemo(
-    () => mockBills.find((b) => b.id === billId),
+    () =>
+      isDevMockDataEnabled()
+        ? mockBills.find((b) => b.id === billId)
+        : undefined,
     [billId],
   );
   const bill = serverBill ?? mockBill;

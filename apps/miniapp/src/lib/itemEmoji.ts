@@ -1,4 +1,4 @@
-import type { Item } from "@/app/billMock";
+import type { Item } from "@/app/billTypes";
 
 /** Longer phrases first so e.g. "pepperoni pizza" wins over "pizza". */
 const KEYWORD_EMOJIS: { match: string; emoji: string }[] = [
