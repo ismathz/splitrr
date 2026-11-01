@@ -59,6 +59,47 @@ export function ingestVisibleGroupUsers(input: {
 }
 
 /**
+ * Record join/leave/status changes from `chat_member` updates.
+ * Requires webhook `allowed_updates` to include `chat_member` and the bot
+ * must be a group administrator — otherwise Telegram never sends these.
+ */
+export function ingestChatMemberUpdate(input: {
+  ctx: Context;
+  groups: GroupRepository;
+  roster: GroupRosterRepository;
+}): void {
+  const { ctx, groups, roster } = input;
+  const chat = ctx.chat;
+  if (!isGroupChat(chat)) return;
+
+  const update = ctx.chatMember;
+  if (!update?.new_chat_member?.user) return;
+
+  const groupId = groups.upsertGroup(
+    String(chat.id),
+    "title" in chat ? (chat.title ?? "Untitled group") : "Untitled group",
+  );
+
+  const user = update.new_chat_member.user;
+  if (user.is_bot) return;
+
+  const status = update.new_chat_member.status;
+  if (status === "left" || status === "kicked") {
+    roster.removeByTelegramUserId(groupId, String(user.id));
+    return;
+  }
+  // member | administrator | creator | restricted (still in chat)
+  if (
+    status === "member" ||
+    status === "administrator" ||
+    status === "creator" ||
+    status === "restricted"
+  ) {
+    roster.observeTelegramUser(groupId, user);
+  }
+}
+
+/**
  * Backfill chat administrators into the stored roster and refresh member_count.
  * Call on `/split` in groups — Bot API cannot list all members.
  */

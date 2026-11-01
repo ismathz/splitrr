@@ -167,10 +167,21 @@ export async function getSessionMembers(chatId: string): Promise<TelegramGroupMe
   }> = [];
   try {
     rawMembers = await collectMembers(tg, chatId, "all");
-  } catch {
+  } catch (allErr) {
+    // Bots that are not group admins typically get CHAT_ADMIN_REQUIRED here.
+    console.warn(
+      "[roster] mtcute iterChatMembers(all) failed",
+      chatId,
+      allErr instanceof Error ? allErr.message : allErr,
+    );
     try {
       rawMembers = await collectMembers(tg, chatId, "recent");
-    } catch {
+    } catch (recentErr) {
+      console.warn(
+        "[roster] mtcute iterChatMembers(recent) failed",
+        chatId,
+        recentErr instanceof Error ? recentErr.message : recentErr,
+      );
       rawMembers = [];
     }
   }

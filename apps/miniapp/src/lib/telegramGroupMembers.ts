@@ -235,14 +235,19 @@ function withCurrentUser(
 
 async function fetchMembersFromBotApi(
   initData: string,
+  telegramChatId?: string | null,
 ): Promise<TelegramGroupMember[] | null> {
   const base = import.meta.env.VITE_BOT_MINIAPP_API;
   if (typeof base !== "string" || !base.trim()) return null;
   const url = `${base.replace(/\/$/, "")}/miniapp/group-members`;
+  const payload: { initData: string; telegramChatId?: string } = { initData };
+  if (telegramChatId?.trim()) {
+    payload.telegramChatId = telegramChatId.trim();
+  }
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ initData }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) return null;
   const data: unknown = await res.json();
@@ -421,7 +426,7 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
       } else {
         setStatus("empty");
         setStatusMessage(
-          "No members yet. Run /split in the group, or turn off BotFather /setprivacy / make the bot admin so it can see people.",
+          "No members yet. Run /split in the group. For a fuller list: BotFather → /setprivacy → Disable, or make @SplitrrBot a group admin, then re-run /split.",
         );
       }
       return;
@@ -457,7 +462,7 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
             if (!rosterMembers.length) {
               rosterStatus = "empty";
               rosterMessage =
-                "No members yet. Run /split in the group. If the list stays empty, disable BotFather /setprivacy or make the bot a group admin so it can see ordinary messages.";
+                "No members yet. Run /split in the group. If the list stays empty: BotFather → /setprivacy → Disable, or make @SplitrrBot a group admin so it can see ordinary messages.";
             }
           } catch (err) {
             rosterMembers = [];
@@ -470,14 +475,18 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
               rosterMessage =
                 "Could not load the group roster. Check your connection and try again.";
             }
-            console.warn("[splitbot] roster fetch failed", err);
+            console.warn("[splitrr] roster fetch failed", err);
           }
         }
 
         let botMembers: TelegramGroupMember[] = [];
         if (canFetchBot) {
           try {
-            botMembers = (await fetchMembersFromBotApi(launch.initData)) ?? [];
+            botMembers =
+              (await fetchMembersFromBotApi(
+                launch.initData,
+                billCtx?.telegramChatId ?? null,
+              )) ?? [];
           } catch {
             botMembers = [];
           }
@@ -506,7 +515,7 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
           setStatus("ok");
           setStatusMessage(
             nextMemberCount != null && merged.length < nextMemberCount
-              ? `Showing ${merged.length} of ${nextMemberCount} members the bot has seen. Others can be added by name, or make the bot admin / disable privacy so more appear.`
+              ? `Showing ${merged.length} of ${nextMemberCount} people the bot has seen. Telegram does not give bots a full member list — add missing people by name, or BotFather → /setprivacy → Disable / make @SplitrrBot a group admin so more appear over time.`
               : null,
           );
         } else if (rosterStatus) {
@@ -515,7 +524,7 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
         } else {
           setStatus("empty");
           setStatusMessage(
-            "No members yet. Run /split in the group, or turn off BotFather /setprivacy / make the bot admin so it can see people.",
+            "No members yet. Run /split in the group. For a fuller list: BotFather → /setprivacy → Disable, or make @SplitrrBot a group admin.",
           );
         }
       } catch (err) {
@@ -531,7 +540,7 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
               ? null
               : "Could not load members. Re-open from /split in the group.",
           );
-          console.warn("[splitbot] group members resolve failed", err);
+          console.warn("[splitrr] group members resolve failed", err);
         }
       } finally {
         if (!cancelled) setIsLoading(false);
