@@ -7,6 +7,7 @@ import { signAvatarRequest, verifyAvatarRequest } from "./avatarSignature";
 import { env } from "./env";
 import {
   backfillGroupAdminsAndCount,
+  ingestChatMemberUpdate,
   ingestVisibleGroupUsers
 } from "./groupRoster";
 import { getSessionMembers, initMtcute, type TelegramGroupMember } from "./mtcuteClient";
@@ -16,8 +17,9 @@ import {
   webAppUrlWithStartParam
 } from "./miniAppUrl";
 import { buildOpenMiniAppReplyMarkup } from "./openMiniAppMarkup";
+import { resolveGroupMembersChatId } from "./resolveGroupMembersChatId";
 import {
-  parseTelegramChatIdFromInitData,
+  parseTelegramUserFromInitData,
   validateWebAppInitData
 } from "./telegramWebAppAuth";
 
@@ -34,6 +36,15 @@ bot.use(async (ctx, next) => {
     console.warn("[roster] ingest failed", err);
   }
   return next();
+});
+
+// Full join/leave stream — only delivered when bot is admin + webhook includes chat_member.
+bot.on("chat_member", (ctx) => {
+  try {
+    ingestChatMemberUpdate({ ctx, groups, roster });
+  } catch (err) {
+    console.warn("[roster] chat_member ingest failed", err);
+  }
 });
 
 
@@ -124,7 +135,7 @@ bot.command("split", async (ctx) => {
     }
 
     await ctx.reply(
-      "Open Splitrr to create or continue a bill for this chat.",
+      "Open Splitrr to create or continue a bill for this chat. Tip: for a fuller member list, disable BotFather /setprivacy or make the bot a group admin, then re-run /split.",
       {
         reply_markup: buildOpenMiniAppReplyMarkup({
           chatType: chat.type,
@@ -272,16 +283,71 @@ app.post("/miniapp/group-members", async (c) => {
   if (!validateWebAppInitData(initData, env.TELEGRAM_BOT_TOKEN)) {
     return c.json({ error: "invalid_init_data" }, 401);
   }
-  const chatId = parseTelegramChatIdFromInitData(initData);
-  if (!chatId) {
-    return c.json({ members: [] });
+
+  const bodyChatId = (body as { telegramChatId?: unknown }).telegramChatId;
+  const resolved = resolveGroupMembersChatId({
+    initData,
+    telegramChatId: typeof bodyChatId === "string" ? bodyChatId : null
+  });
+  if (!resolved.ok) {
+    if (resolved.error === "chat_mismatch") {
+      return c.json({ error: "chat_mismatch", members: [] }, 403);
+    }
+    return c.json({
+      members: [],
+      hint: "missing_chat_id",
+      message:
+        "Open Splitrr via /split in the group so the Mini App receives a group cid."
+    });
   }
+
+  const chatId = resolved.chatId;
+  const groupId = groups.upsertGroup(chatId, "Group");
+  const webAppUser = parseTelegramUserFromInitData(initData);
+  if (webAppUser?.id != null) {
+    roster.observeTelegramUser(groupId, webAppUser);
+  }
+
+  let mtcuteMembers: TelegramGroupMember[] = [];
+  let mtcuteError: string | null = null;
   try {
-    const members = await getSessionMembers(chatId);
-    return c.json({ members: toPublicMembers(members, chatId) });
-  } catch {
-    return c.json({ members: [] });
+    mtcuteMembers = await getSessionMembers(chatId);
+    // Persist MTProto hits into the shared SQLite roster (same DB as the API).
+    for (const m of mtcuteMembers) {
+      roster.observeTelegramUser(groupId, {
+        id: m.tgUserId,
+        first_name: m.name
+      });
+    }
+  } catch (err) {
+    mtcuteError = err instanceof Error ? err.message : "mtcute_failed";
+    console.warn("[roster] mtcute group-members failed", chatId, mtcuteError);
   }
+
+  // Prefer mtcute enrichment (avatars); fall back to stored roster rows.
+  if (mtcuteMembers.length > 0) {
+    return c.json({
+      members: toPublicMembers(mtcuteMembers, chatId),
+      source: "mtcute",
+      mtcuteError: null
+    });
+  }
+
+  const stored: TelegramGroupMember[] = roster.listMembers(groupId).map((m) => ({
+    tgUserId: m.tgUserId,
+    name: m.name,
+    avatarBgColors: [],
+    hasPhoto: Boolean(m.photoUrl)
+  }));
+  return c.json({
+    members: toPublicMembers(stored, chatId),
+    source: "roster",
+    mtcuteError,
+    hint:
+      stored.length === 0
+        ? "empty_roster"
+        : "partial_roster_privacy_or_admin"
+  });
 });
 
 const handleTelegramWebhook = webhookCallback(bot, "hono");

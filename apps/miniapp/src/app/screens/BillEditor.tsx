@@ -2293,7 +2293,12 @@ export function BillEditor(props: BillEditorProps) {
               {groupUnseenCount != null && groupUnseenCount > 0
                 ? ` About ${groupUnseenCount} group member${
                     groupUnseenCount === 1 ? "" : "s"
-                  } not seen by the bot yet.`
+                  } not listed yet — Telegram does not give bots a full member list. BotFather → /setprivacy → Disable, or make @SplitrrBot a group admin, then re-run /split.`
+                : null}
+              {groupRosterStatusMessage &&
+              groupMembers.length > 0 &&
+              !(groupUnseenCount != null && groupUnseenCount > 0)
+                ? ` ${groupRosterStatusMessage}`
                 : null}
             </DrawerDescription>
           </DrawerHeader>
@@ -2392,7 +2397,7 @@ export function BillEditor(props: BillEditorProps) {
                       ? "Could not authorize with Telegram. Close and re-open Splitrr from /split."
                       : groupRosterStatus === "no_context"
                         ? "Open Splitrr from /split in the group so the roster can load."
-                        : "No members yet. Run /split in the group. If it stays empty, disable BotFather /setprivacy or make the bot a group admin, then re-run /split. You can still add people by name above.")}
+                        : "No members yet. Run /split in the group. If it stays empty: BotFather → /setprivacy → Disable, or make @SplitrrBot a group admin, then re-run /split. You can still add people by name above.")}
                   {import.meta.env.DEV ? (
                     <>
                       {" "}
