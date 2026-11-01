@@ -14,7 +14,7 @@ Telegram Bill Splitter built with Bun + TypeScript.
 ## Architecture
 
 ### Components
-- **Bot webhook (`apps/bot`)**: Receives Telegram updates, supports `/split` (opens Mini App), `/history`, and receipt image intake nudges in groups.
+- **Bot webhook (`apps/bot`)**: Receives Telegram updates; supports `/split` (opens Mini App) and `/history`. Does not reply to casual group photos — receipts are scanned/uploaded in the Mini App.
 - **API (`apps/api`)**: Hono service for bill CRUD, OCR processing, assignments, settlement computation, reminders, and CSV export.
 - **Mini App (`apps/miniapp`)**: Telegram Web App UI for receipt review, assignment, summary, and settlement screens.
 - **SQLite (`bun:sqlite`)**: Core transactional data (`users`, `groups`, `bill_sessions`, `bill_items`, `item_assignments`, `charges`, `settlements`, `activity_events`, `schema_migrations`).

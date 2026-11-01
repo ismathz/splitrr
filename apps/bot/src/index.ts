@@ -199,62 +199,8 @@ bot.command("history", async (ctx) => {
   await ctx.reply(`Recent bills:\n${text}`);
 });
 
-bot.on("message:photo", async (ctx) => {
-  const chat = ctx.chat;
-  if (!chat || !("title" in chat)) {
-    await ctx.reply("Please upload receipt photo in group chat.");
-    return;
-  }
-
-  const group = db
-    .query("SELECT id FROM groups WHERE telegram_chat_id = ?1")
-    .get(String(chat.id)) as { id: number } | null;
-
-  if (!group) {
-    await ctx.reply("Use /split to open Splitrr, then scan or upload the receipt there.");
-    return;
-  }
-
-  const latest = db
-    .query(
-      `SELECT id FROM bill_sessions
-       WHERE group_id = ?1
-       ORDER BY created_at DESC LIMIT 1`
-    )
-    .get(group.id) as { id: string } | null;
-
-  const startPayload = { cid: String(chat.id) };
-  const miniUrl = webAppUrlWithStartParam(startPayload);
-  const direct = directMiniAppLink(startPayload);
-  const replyMarkup = buildOpenMiniAppReplyMarkup({
-    chatType: chat.type,
-    miniUrl,
-    directUrl: direct
-  });
-
-  if (!latest) {
-    const setupMissing = (chat.type === "group" || chat.type === "supergroup") && !direct;
-    await ctx.reply(
-      setupMissing
-        ? `Got your photo. Open Splitrr with /split to scan it (group photos are not auto-OCR’d yet).\n${DEEP_LINK_SETUP_HINT}`
-        : "Got your photo. Open Splitrr to scan or upload the receipt (group photos are not auto-OCR’d yet).",
-      replyMarkup ? { reply_markup: replyMarkup } : undefined
-    );
-    return;
-  }
-
-  if ((chat.type === "group" || chat.type === "supergroup") && !direct) {
-    await ctx.reply(
-      `Got your photo for bill ${latest.id}. Open Splitrr with /split to upload/scan the receipt (group photos are not auto-OCR’d yet).\n${DEEP_LINK_SETUP_HINT}`
-    );
-    return;
-  }
-
-  await ctx.reply(
-    `Got your photo for bill ${latest.id}. Open Splitrr to upload/scan the receipt (group photos are not auto-OCR’d yet).`,
-    replyMarkup ? { reply_markup: replyMarkup } : undefined
-  );
-});
+// Intentionally no message:photo handler. Casual group photos must stay silent;
+// receipts are scanned/uploaded only via the Mini App after /split (or DM).
 
 const app = new Hono();
 
