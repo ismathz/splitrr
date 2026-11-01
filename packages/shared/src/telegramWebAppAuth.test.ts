@@ -18,8 +18,8 @@ function signInitData(
     .filter(([k]) => k !== "hash" && k !== "signature")
     .sort(([a], [b]) => a.localeCompare(b));
   const dataCheckString = pairs.map(([k, v]) => `${k}=${v}`).join("\n");
-  const secretKey = createHmac("sha256", botToken)
-    .update("WebAppData")
+  const secretKey = createHmac("sha256", "WebAppData")
+    .update(botToken)
     .digest();
   const hash = createHmac("sha256", secretKey)
     .update(dataCheckString)
@@ -30,6 +30,52 @@ function signInitData(
 
 describe("validateWebAppInitData", () => {
   const token = "123456:ABC-DEF";
+
+  it("matches Telegram docs secret_key (WebAppData as HMAC key)", () => {
+    // https://docs.telegram-mini-apps.com/platform/init-data
+    const docsToken = "5768337691:AAH5YkoiEuPk8-FZa32hStHTqXiLPtAEhx8";
+    const secretHex = createHmac("sha256", "WebAppData")
+      .update(docsToken)
+      .digest("hex");
+    expect(secretHex).toBe(
+      "a5c609aa52f63cb5e6d8ceb6e4138726ea82bbc36bb786d64482d445ea38ee5f"
+    );
+
+    const dataCheckString = [
+      "auth_date=1662771648",
+      "query_id=AAHdF6IQAAAAAN0XohDhrOrc",
+      'user={"id":279058397,"first_name":"Vladislav","last_name":"Kibenko","username":"vdkfrost","language_code":"ru","is_premium":true}'
+    ].join("\n");
+    const secretKey = createHmac("sha256", "WebAppData")
+      .update(docsToken)
+      .digest();
+    const hash = createHmac("sha256", secretKey)
+      .update(dataCheckString)
+      .digest("hex");
+    expect(hash).toBe(
+      "c501b71e775f74ce10e377dea85a7ea24ecd640b223ea86dfe453e0eaed2e2b2"
+    );
+
+    const initData = new URLSearchParams({
+      query_id: "AAHdF6IQAAAAAN0XohDhrOrc",
+      user: JSON.stringify({
+        id: 279058397,
+        first_name: "Vladislav",
+        last_name: "Kibenko",
+        username: "vdkfrost",
+        language_code: "ru",
+        is_premium: true
+      }),
+      auth_date: "1662771648",
+      hash
+    }).toString();
+    expect(
+      validateWebAppInitData(initData, docsToken, {
+        nowSec: 1662771648 + 60,
+        maxAgeSec: 3600
+      })
+    ).toBe(true);
+  });
 
   it("accepts a fresh signed payload", () => {
     const now = 1_700_000_000;

@@ -50,9 +50,10 @@ export function validateWebAppInitDataDetailed(
   checkPairs.sort(([a], [b]) => a.localeCompare(b));
   const dataCheckString = checkPairs.map(([k, v]) => `${k}=${v}`).join("\n");
 
-  // secret_key = HMAC_SHA256(bot_token, "WebAppData")
-  const secretKey = createHmac("sha256", botToken)
-    .update("WebAppData")
+  // secret_key = HMAC-SHA256(bot_token) with key "WebAppData"
+  // (Telegram: "signature of the bot's token with … WebAppData used as a key")
+  const secretKey = createHmac("sha256", "WebAppData")
+    .update(botToken.trim())
     .digest();
   const calculated = createHmac("sha256", secretKey)
     .update(dataCheckString)
