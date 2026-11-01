@@ -4,8 +4,12 @@ import { normalizeTelegramBotToken } from "./telegramToken";
 /** Default max age for Telegram WebApp initData (24h). */
 export const DEFAULT_INIT_DATA_MAX_AGE_SEC = 24 * 60 * 60;
 
-/** Marker returned by /health so we can confirm the corrected HMAC is live. */
-export const WEBAPP_HMAC_ALGO = "WebAppData-as-key-v1";
+/**
+ * Marker returned by /api/health so we can confirm the live verifier.
+ * v2: data-check-string excludes only `hash` (must INCLUDE `signature` when present —
+ * modern Telegram clients always send Ed25519 `signature` next to HMAC `hash`).
+ */
+export const WEBAPP_HMAC_ALGO = "WebAppData-as-key-v2-include-signature";
 
 export interface TelegramWebAppUser {
   id: number;
@@ -46,16 +50,20 @@ export function validateWebAppInitDataDetailed(
   const hash = pairs.get("hash");
   if (!hash) return { ok: false, reason: "missing_hash" };
 
+  // Bot-token HMAC `hash` is over ALL fields except `hash` itself — including
+  // the Ed25519 `signature` field that modern clients always send.
+  // (@telegram-apps/init-data-node / @tma.js/init-data-node do the same.)
+  // Only third-party Ed25519 validation excludes both hash and signature.
   const checkPairs: [string, string][] = [];
   for (const [k, v] of pairs.entries()) {
-    if (k === "hash" || k === "signature") continue;
+    if (k === "hash") continue;
     checkPairs.push([k, v]);
   }
-  checkPairs.sort(([a], [b]) => a.localeCompare(b));
+  // ASCII sort (avoid localeCompare quirks); matches URLSearchParams + .sort().
+  checkPairs.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const dataCheckString = checkPairs.map(([k, v]) => `${k}=${v}`).join("\n");
 
   // secret_key = HMAC-SHA256(bot_token) with key "WebAppData"
-  // (Telegram: "signature of the bot's token with … WebAppData used as a key")
   const secretKey = createHmac("sha256", "WebAppData")
     .update(normalizeTelegramBotToken(botToken))
     .digest();

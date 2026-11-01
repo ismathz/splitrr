@@ -12,6 +12,7 @@ import {
   readInitDataFromHeaders,
   readInitDataFromQuery
 } from "./authInitData";
+import { initDataShapeFlags, recordAuthFailure } from "./authFailureDebug";
 
 export type ApiAuthVariables = {
   telegramUser: TelegramWebAppUser | null;
@@ -78,15 +79,20 @@ export async function requireTelegramAuth(c: Context, next: Next) {
       source: string;
       reason: string;
       len: number;
+      hasSignature: boolean;
+      hasHash: boolean;
     }> = [];
 
     for (const candidate of candidates) {
       for (const variant of expandInitDataVariants(candidate.value)) {
+        const shape = initDataShapeFlags(variant);
         const result = validateWebAppInitDataDetailed(variant, token);
         attempts.push({
           source: candidate.source,
           reason: result.ok ? "ok" : result.reason,
-          len: variant.length
+          len: variant.length,
+          hasSignature: shape.hasSignature,
+          hasHash: shape.hasHash
         });
         if (result.ok) {
           const user = parseTelegramUserFromInitData(variant);
@@ -105,6 +111,15 @@ export async function requireTelegramAuth(c: Context, next: Next) {
       attempts.find((a) => a.reason === "auth_date_in_future")?.reason ??
       attempts[attempts.length - 1]?.reason ??
       "bad_hash";
+
+    recordAuthFailure({
+      path: c.req.path,
+      method: c.req.method,
+      reason,
+      botId: tokenFp.botId,
+      tokenSuffix: tokenFp.tokenSuffix,
+      attempts
+    });
 
     console.warn("[auth] invalid_init_data", {
       botId: tokenFp.botId,

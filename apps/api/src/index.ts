@@ -194,9 +194,10 @@ app.get("/health", async (c) => c.json(await healthPayload()));
 
 app.use("/api/reminders/*", requireCronSecret);
 app.use("/api/*", async (c, next) => {
-  // `/api/health` is public (tunnel routes `/api/*` → API; bare `/health` hits bot).
+  // Public dig endpoints (tunnel routes `/api/*` → API; bare `/health` hits bot).
   if (
     c.req.path === "/api/health" ||
+    c.req.path === "/api/auth/last-failures" ||
     c.req.path.startsWith("/api/reminders/")
   ) {
     return next();
@@ -205,6 +206,16 @@ app.use("/api/*", async (c, next) => {
 });
 
 app.get("/api/health", async (c) => c.json(await healthPayload()));
+
+/** Temporary: last initData auth failures (reasons/shape only — no secrets). */
+app.get("/api/auth/last-failures", async (c) => {
+  const { listRecentAuthFailures } = await import("./authFailureDebug");
+  return c.json({
+    ok: true,
+    hmacAlgo: (await getTelegramDiagCached()).hmacAlgo,
+    failures: listRecentAuthFailures()
+  });
+});
 
 app.post("/api/bills", async (c) => {
   const body = await c.req.json<{
