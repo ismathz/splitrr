@@ -2,9 +2,13 @@ import { Bot, webhookCallback } from "grammy";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
-import { createDb, GroupRepository } from "@splitbot/db";
+import { createDb, GroupRepository, GroupRosterRepository } from "@splitbot/db";
 import { signAvatarRequest, verifyAvatarRequest } from "./avatarSignature";
 import { env } from "./env";
+import {
+  backfillGroupAdminsAndCount,
+  ingestVisibleGroupUsers
+} from "./groupRoster";
 import { getSessionMembers, initMtcute, type TelegramGroupMember } from "./mtcuteClient";
 import {
   directMiniAppLink,
@@ -20,6 +24,18 @@ import {
 const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
+const roster = new GroupRosterRepository(db);
+
+// Persist every human the bot can see in groups (privacy mode limits this).
+bot.use(async (ctx, next) => {
+  try {
+    ingestVisibleGroupUsers({ ctx, groups, roster });
+  } catch (err) {
+    console.warn("[roster] ingest failed", err);
+  }
+  return next();
+});
+
 
 const AVATAR_SIG_TTL_SEC = 3600;
 
@@ -87,7 +103,18 @@ bot.command("split", async (ctx) => {
 
   // Group / supergroup: upsert group only — bills are created in the Mini App.
   if (chat.type === "group" || chat.type === "supergroup") {
-    groups.upsertGroup(String(chat.id), "title" in chat ? (chat.title ?? "Untitled group") : "Untitled group");
+    const groupId = groups.upsertGroup(
+      String(chat.id),
+      "title" in chat ? (chat.title ?? "Untitled group") : "Untitled group"
+    );
+    // Backfill admins + member_count into the stored roster (Bot API has no full list).
+    await backfillGroupAdminsAndCount({
+      api: ctx.api,
+      chatId: chat.id,
+      groupId,
+      groups,
+      roster
+    });
 
     if (!hasDirectMiniAppLinkConfig() || !direct) {
       await ctx.reply(

@@ -8,6 +8,8 @@ export interface TelegramWebAppUser {
   first_name?: string;
   last_name?: string;
   username?: string;
+  /** Present on Mini App initData `user` when Telegram includes it (cheap photo). */
+  photo_url?: string;
 }
 
 /**

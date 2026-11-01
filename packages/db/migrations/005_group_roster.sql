@@ -1,0 +1,2 @@
+ALTER TABLE groups ADD COLUMN member_count INTEGER;
+ALTER TABLE users ADD COLUMN photo_url TEXT;
