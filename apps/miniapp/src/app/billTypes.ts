@@ -20,6 +20,12 @@ export function formatBillDateLabel(isoDate: string): string {
   });
 }
 
+export type BillMemberProfile = {
+  name: string;
+  photoUrl?: string | null;
+  tgUserId?: number | null;
+};
+
 export type BillDetails = {
   id: string;
   title: string;
@@ -34,5 +40,7 @@ export type BillDetails = {
   settled: boolean;
   /** Bill participants persisted independently of item assignees. */
   members?: string[];
+  /** Optional roster photos / Telegram ids for avatars on details. */
+  memberProfiles?: BillMemberProfile[];
   items: Item[];
 };

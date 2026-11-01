@@ -213,6 +213,12 @@ export async function runReceiptOcr(
   return res.json() as Promise<ParsedReceipt>;
 }
 
+export type ApiBillMemberProfile = {
+  name: string;
+  photoUrl: string | null;
+  tgUserId: number | null;
+};
+
 export type ApiBillDetails = {
   id: string;
   title: string;
@@ -223,6 +229,8 @@ export type ApiBillDetails = {
   settled: boolean;
   /** First-class bill participants (may include people not yet on any item). */
   members?: string[];
+  /** Roster-enriched member photos / Telegram ids for avatars. */
+  memberProfiles?: ApiBillMemberProfile[];
   items: Array<{
     id: string;
     name: string;
@@ -379,7 +387,7 @@ export async function updateBillPaymentStatus(
   base: string,
   billId: string,
   body: { name: string; paid: boolean },
-): Promise<{ ok: true }> {
+): Promise<{ ok: true; status?: "draft" | "pending" | "completed" }> {
   const res = await apiFetch(`${base}/api/bills/${billId}/payment-status`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -389,7 +397,10 @@ export async function updateBillPaymentStatus(
     const t = await res.text();
     throw new Error(t || `update payment status failed: ${res.status}`);
   }
-  return res.json() as Promise<{ ok: true }>;
+  return res.json() as Promise<{
+    ok: true;
+    status?: "draft" | "pending" | "completed";
+  }>;
 }
 
 export async function computeBillSettlements(

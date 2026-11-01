@@ -820,6 +820,70 @@ app.get("/api/bills/:billId", (c) => {
     }
   }
 
+  // Match bill members to Telegram roster users for photo_url / tg ids.
+  const sessionGroup = db
+    .query("SELECT group_id FROM bill_sessions WHERE id = ?1")
+    .get(billId) as { group_id: number } | null;
+  const rosterRows =
+    sessionGroup == null
+      ? []
+      : (db
+          .query(
+            `SELECT u.telegram_user_id AS telegram_user_id,
+                    u.username AS username,
+                    u.first_name AS first_name,
+                    u.last_name AS last_name,
+                    u.photo_url AS photo_url
+             FROM group_members gm
+             JOIN users u ON u.id = gm.user_id
+             WHERE gm.group_id = ?1`
+          )
+          .all(sessionGroup.group_id) as Array<{
+          telegram_user_id: string;
+          username: string | null;
+          first_name: string | null;
+          last_name: string | null;
+          photo_url: string | null;
+        }>);
+
+  type RosterHit = {
+    tgUserId: number | null;
+    photoUrl: string | null;
+  };
+  const rosterByKey = new Map<string, RosterHit>();
+  for (const row of rosterRows) {
+    if (row.telegram_user_id.startsWith("name:")) continue;
+    if (row.telegram_user_id.startsWith("web-")) continue;
+    const tgUserId = Number(row.telegram_user_id);
+    const hit: RosterHit = {
+      tgUserId: Number.isFinite(tgUserId) ? tgUserId : null,
+      photoUrl: row.photo_url?.trim() || null,
+    };
+    const first = row.first_name?.trim() ?? "";
+    const last = row.last_name?.trim() ?? "";
+    const full = `${first} ${last}`.trim();
+    const username = row.username?.trim() ?? "";
+    for (const keyRaw of [full, first, username, username ? `@${username.replace(/^@/, "")}` : ""]) {
+      const key = keyRaw.trim().toLowerCase();
+      if (!key) continue;
+      const existing = rosterByKey.get(key);
+      if (!existing) {
+        rosterByKey.set(key, hit);
+      } else if (!existing.photoUrl && hit.photoUrl) {
+        rosterByKey.set(key, hit);
+      }
+    }
+  }
+
+  const memberProfiles = members.map((name) => {
+    const hit = rosterByKey.get(name.trim().toLowerCase());
+    return {
+      name,
+      photoUrl: hit?.photoUrl ?? null,
+      tgUserId: hit?.tgUserId ?? null,
+    };
+  });
+
   const status = normalizeBillSessionStatus(session.status);
   return c.json({
     id: session.id,
@@ -830,6 +894,7 @@ app.get("/api/bills/:billId", (c) => {
     place: session.place,
     settled: status === "completed",
     members,
+    memberProfiles,
     items: mappedItems,
   });
 });
@@ -1441,8 +1506,30 @@ app.get("/api/groups/:groupId/history", (c) => {
       createdByTelegramRaw && createdByInternal == null
         ? -1 // filter requested but user unknown → empty
         : createdByInternal
-    );
-  return c.json({ bills: rows });
+    ) as Array<{
+    id: string;
+    title: string;
+    status: string;
+    currency: string;
+    bill_date: string;
+    place: string | null;
+    created_at: string;
+  }>;
+  return c.json({
+    bills: rows.map((row) => {
+      const status = normalizeBillSessionStatus(row.status);
+      return {
+        id: row.id,
+        title: row.title,
+        status,
+        currency: row.currency,
+        billDate: row.bill_date,
+        place: row.place,
+        settled: status === "completed",
+        createdAt: row.created_at,
+      };
+    }),
+  });
 });
 
 app.get("/api/groups/by-telegram-chat/:telegramChatId/history", (c) => {
@@ -1475,9 +1562,31 @@ app.get("/api/groups/by-telegram-chat/:telegramChatId/history", (c) => {
     .all(
       group.id,
       createdByTelegramRaw && createdByInternal == null ? -1 : createdByInternal
-    );
+    ) as Array<{
+    id: string;
+    title: string;
+    status: string;
+    currency: string;
+    bill_date: string;
+    place: string | null;
+    created_at: string;
+  }>;
 
-  return c.json({ bills: rows });
+  return c.json({
+    bills: rows.map((row) => {
+      const status = normalizeBillSessionStatus(row.status);
+      return {
+        id: row.id,
+        title: row.title,
+        status,
+        currency: row.currency,
+        billDate: row.bill_date,
+        place: row.place,
+        settled: status === "completed",
+        createdAt: row.created_at,
+      };
+    }),
+  });
 });
 
 /**

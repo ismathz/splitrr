@@ -16,16 +16,16 @@ describe("normalizeBillSessionStatus", () => {
 });
 
 describe("statusAfterOpenWithMembers", () => {
-  it("promotes draft to pending when members exist", () => {
+  it("promotes draft to pending when opened (even without members)", () => {
     expect(
       statusAfterOpenWithMembers({ currentStatus: "draft", memberCount: 2 })
     ).toBe("pending");
-  });
-
-  it("keeps draft when no members", () => {
     expect(
       statusAfterOpenWithMembers({ currentStatus: "draft", memberCount: 0 })
-    ).toBe("draft");
+    ).toBe("pending");
+    expect(
+      statusAfterOpenWithMembers({ currentStatus: "active" })
+    ).toBe("pending");
   });
 
   it("keeps completed", () => {
@@ -58,6 +58,15 @@ describe("statusFromPaymentChecklist", () => {
         ]),
       })
     ).toBe("pending");
+  });
+
+  it("matches paid flags case-insensitively", () => {
+    expect(
+      statusFromPaymentChecklist({
+        memberNames: ["Ada", "Bob"],
+        paidByName: { ada: true, BOB: true },
+      })
+    ).toBe("completed");
   });
 
   it("keeps draft when no members", () => {

@@ -185,3 +185,15 @@ WHERE status = 'draft'
     WHERE m.bill_session_id = bill_sessions.id
   );
 `;
+
+/** Promote drafts that were opened with assignees but no bill_session_members row. */
+export const v8PromoteDraftsWithAssignments = `
+UPDATE bill_sessions
+SET status = 'pending', updated_at = datetime('now')
+WHERE status = 'draft'
+  AND EXISTS (
+    SELECT 1 FROM bill_items i
+    JOIN item_assignments a ON a.bill_item_id = i.id
+    WHERE i.bill_session_id = bill_sessions.id
+  );
+`;

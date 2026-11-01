@@ -8,6 +8,7 @@ import {
   v5GroupRoster,
   v6BillSessionMembers,
   v7BillSessionStatusPendingCompleted,
+  v8PromoteDraftsWithAssignments,
 } from "./schema";
 
 const orderedMigrations: Array<{ name: string; sql: string }> = [
@@ -20,6 +21,10 @@ const orderedMigrations: Array<{ name: string; sql: string }> = [
   {
     name: "007_bill_status_pending_completed.sql",
     sql: v7BillSessionStatusPendingCompleted,
+  },
+  {
+    name: "008_promote_drafts_with_assignments.sql",
+    sql: v8PromoteDraftsWithAssignments,
   },
 ];
 
