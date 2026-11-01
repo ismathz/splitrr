@@ -70,14 +70,14 @@ describe("toUserFriendlyErrorMessage auth", () => {
     expect(msg.toLowerCase()).toContain("checksum");
   });
 
-  it("maps openai_quota_exhausted distinctly from rate limits", () => {
+  it("maps openrouter_quota_exhausted distinctly from rate limits", () => {
     const msg = toUserFriendlyErrorMessage(
       new Error(
         JSON.stringify({
           error:
-            "OpenAI account has no usable credit/quota for OCR. Add billing/credits for the OPENAI_API_KEY on the API host, then retry.",
-          code: "openai_quota_exhausted",
-          openaiCode: "credit_balance_exhausted",
+            "OpenRouter account has no usable credit/quota for OCR. Add credits at openrouter.ai for the OPENROUTER_API_KEY on the API host, then retry.",
+          code: "openrouter_quota_exhausted",
+          openrouterCode: "insufficient_credits",
         }),
       ),
     );

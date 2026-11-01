@@ -11,7 +11,7 @@ import {
 import type { ParsedReceipt, ParsedReceiptAdjustment } from "@splitbot/shared";
 import { env } from "./env";
 import { classifyStorageError, StorageService } from "./storage";
-import { OpenAiOcrProvider, toOpenAiImageDataUrl } from "./ocr";
+import { OpenRouterOcrProvider, toOcrImageDataUrl } from "./ocr";
 import { requireCronSecret, requireTelegramAuth } from "./auth";
 import { RateLimiter } from "./rateLimit";
 import { validateReceiptFile } from "./receiptValidation";
@@ -26,7 +26,7 @@ import { authorizeRosterChatAccess } from "./roster";
 import { backfillRosterFromBotApi } from "./telegramRosterBackfill";
 import { buildTelegramDiag, type TelegramDiag } from "./telegramDiag";
 import {
-  classifyOpenAiError,
+  classifyOpenRouterError,
   listRecentPipelineFailures,
   recordPipelineFailure
 } from "./pipelineErrors";
@@ -48,11 +48,19 @@ const storage = new StorageService({
   secretAccessKey: env.S3_SECRET_ACCESS_KEY,
   keyPrefix: env.S3_KEY_PREFIX
 });
-const ocr = new OpenAiOcrProvider(env.OPENAI_API_KEY, env.OPENAI_MODEL);
+const ocr = new OpenRouterOcrProvider(
+  env.OPENROUTER_API_KEY,
+  env.OPENROUTER_MODEL,
+  env.OPENROUTER_BASE_URL,
+  {
+    referer: env.TELEGRAM_WEBAPP_URL,
+    title: "Splitbot"
+  }
+);
 const OCR_MIN_ITEM_CONFIDENCE = 0.6;
 
 // Per-IP token buckets (single VPS process). Keep headroom so retries after
-// OpenAI/network blips are not blocked; OpenAI billing/quota is separate.
+// OpenRouter/network blips are not blocked; OpenRouter billing/quota is separate.
 const uploadLimiter = new RateLimiter(60, 60 / 60);
 const ocrLimiter = new RateLimiter(30, 30 / 60);
 
@@ -150,18 +158,19 @@ app.onError((err, c) => {
     /S3|NoSuchBucket|AccessDenied|checksum|ECONNREFUSED|ENOTFOUND|storage_/i.test(
       `${name} ${message}`
     );
-  const openaiHit = /OpenAI|openai|invalid_image|Timeout while downloading/i.test(
-    `${name} ${message}`
-  );
+  const openrouterHit =
+    /OpenRouter|openrouter|OpenAI|openai|invalid_image|Timeout while downloading/i.test(
+      `${name} ${message}`
+    );
   const code = storageHit
     ? "storage_uncaught"
-    : openaiHit
-      ? "openai_uncaught"
+    : openrouterHit
+      ? "openrouter_uncaught"
       : "internal_error";
   const userMessage = storageHit
     ? "Receipt storage failed unexpectedly. Check S3/R2 env and /api/pipeline/last-failures."
-    : openaiHit
-      ? "Receipt OCR failed unexpectedly. Check OPENAI_API_KEY / model and retry as JPEG/PNG."
+    : openrouterHit
+      ? "Receipt OCR failed unexpectedly. Check OPENROUTER_API_KEY / OPENROUTER_MODEL and retry as JPEG/PNG."
       : "Something went wrong while processing the receipt.";
 
   try {
@@ -221,7 +230,7 @@ void getTelegramDiagCached().catch((err) =>
 
 async function healthPayload() {
   const telegram = await getTelegramDiagCached();
-  const openaiKey = env.OPENAI_API_KEY?.trim() ?? "";
+  const openrouterKey = env.OPENROUTER_API_KEY?.trim() ?? "";
   return {
     ok: true as const,
     service: "api",
@@ -237,10 +246,11 @@ async function healthPayload() {
       getMeError: telegram.getMe.error ?? null,
       tokenMatchesExpectedBot: telegram.tokenMatchesExpectedBot
     },
-    openai: {
-      keyConfigured: openaiKey.length > 0,
-      keySuffix: openaiKey ? openaiKey.slice(-4) : null,
-      model: env.OPENAI_MODEL
+    openrouter: {
+      keyConfigured: openrouterKey.length > 0,
+      keySuffix: openrouterKey ? openrouterKey.slice(-4) : null,
+      model: env.OPENROUTER_MODEL,
+      baseUrl: env.OPENROUTER_BASE_URL
     },
     storage: {
       endpointHost: (() => {
@@ -542,11 +552,11 @@ app.post("/api/bills/:billId/ocr", async (c) => {
     .get(billId, storageKey) as { id: string; mime_type: string } | null;
 
   try {
-    // Pull bytes from R2 ourselves and send a data URL. OpenAI frequently fails
-    // to fetch private R2/S3 signed URLs (Timeout while downloading / invalid_image_url).
+    // Pull bytes from R2 ourselves and send a data URL. OpenRouter/upstream often
+    // fails to fetch private R2/S3 signed URLs (Timeout / invalid_image_url).
     const object = await storage.getObjectBytes(storageKey);
     const mime = receiptRow?.mime_type || object.contentType;
-    const dataUrl = toOpenAiImageDataUrl(object.bytes, mime);
+    const dataUrl = toOcrImageDataUrl(object.bytes, mime);
     if (!dataUrl.ok) {
       if (receiptRow) {
         db.query(
@@ -644,7 +654,7 @@ app.post("/api/bills/:billId/ocr", async (c) => {
       console.warn("[ocr] failed to mark receipt failed", markErr);
     }
 
-    // Prefer storage classification when GetObject failed; else OpenAI.
+    // Prefer storage classification when GetObject failed; else OpenRouter.
     const errObj = err as {
       name?: string;
       message?: string;
@@ -661,10 +671,10 @@ app.post("/api/bills/:billId/ocr", async (c) => {
     const classified = isStorageErr
       ? {
           ...classifyStorageError(err),
-          openaiStatus: undefined as number | undefined,
-          openaiCode: undefined as string | undefined
+          openrouterStatus: undefined as number | undefined,
+          openrouterCode: undefined as string | undefined
         }
-      : classifyOpenAiError(err);
+      : classifyOpenRouterError(err);
 
     console.error("[ocr]", classified.code, err);
     try {
@@ -674,8 +684,8 @@ app.post("/api/bills/:billId/ocr", async (c) => {
         code: classified.code,
         message: classified.message,
         httpStatus: classified.status,
-        openaiStatus: classified.openaiStatus,
-        openaiCode: classified.openaiCode,
+        openrouterStatus: classified.openrouterStatus,
+        openrouterCode: classified.openrouterCode,
         mime: receiptRow?.mime_type
       });
     } catch {
@@ -685,8 +695,8 @@ app.post("/api/bills/:billId/ocr", async (c) => {
       {
         error: classified.message,
         code: classified.code,
-        openaiStatus: classified.openaiStatus ?? null,
-        openaiCode: classified.openaiCode ?? null
+        openrouterStatus: classified.openrouterStatus ?? null,
+        openrouterCode: classified.openrouterCode ?? null
       },
       classified.status as 502
     );

@@ -9,8 +9,8 @@ export type PipelineFailureRecord = {
   code: string;
   message: string;
   httpStatus?: number;
-  openaiStatus?: number;
-  openaiCode?: string;
+  openrouterStatus?: number;
+  openrouterCode?: string;
   mime?: string;
   sizeBytes?: number;
 };
@@ -29,12 +29,12 @@ export function listRecentPipelineFailures(): PipelineFailureRecord[] {
   return [...recent];
 }
 
-export function classifyOpenAiError(err: unknown): {
+export function classifyOpenRouterError(err: unknown): {
   code: string;
   message: string;
   status: number;
-  openaiStatus?: number;
-  openaiCode?: string;
+  openrouterStatus?: number;
+  openrouterCode?: string;
 } {
   const anyErr = err as {
     name?: string;
@@ -44,79 +44,87 @@ export function classifyOpenAiError(err: unknown): {
     message?: string;
     error?: { code?: string; type?: string; message?: string };
   };
-  const openaiStatus = anyErr?.status;
-  const openaiCode = anyErr?.code || anyErr?.error?.code || anyErr?.type;
+  const openrouterStatus = anyErr?.status;
+  const openrouterCode = anyErr?.code || anyErr?.error?.code || anyErr?.type;
   const raw = anyErr?.error?.message || anyErr?.message || "";
+  const blob = `${openrouterCode} ${raw}`;
 
-  if (openaiStatus === 401 || /invalid_api_key|authentication/i.test(`${openaiCode} ${raw}`)) {
-    return {
-      code: "openai_auth_failed",
-      message:
-        "OpenAI rejected the API key. Set a valid OPENAI_API_KEY on the API host and restart splitbot-api.",
-      status: 502,
-      openaiStatus,
-      openaiCode
-    };
-  }
-  // OpenAI uses HTTP 429 for both true rate limits AND billing/quota exhaustion.
-  // credit_balance_exhausted / insufficient_quota are NOT fixed by waiting a minute.
   if (
-    /credit_balance_exhausted|insufficient_quota|billing_not_active|billing_hard_limit/i.test(
-      `${openaiCode} ${raw}`
+    openrouterStatus === 401 ||
+    openrouterStatus === 403 ||
+    /invalid_api_key|authentication|unauthorized|user not found|no auth credentials/i.test(
+      blob
     )
   ) {
     return {
-      code: "openai_quota_exhausted",
+      code: "openrouter_auth_failed",
       message:
-        "OpenAI account has no usable credit/quota for OCR. Add billing/credits for the OPENAI_API_KEY on the API host, then retry.",
+        "OpenRouter rejected the API key. Set a valid OPENROUTER_API_KEY on the API host and restart splitbot-api.",
       status: 502,
-      openaiStatus,
-      openaiCode
+      openrouterStatus,
+      openrouterCode
+    };
+  }
+  // OpenRouter/providers use 402/429 (and various codes) for billing vs rate limits.
+  if (
+    openrouterStatus === 402 ||
+    /credit_balance_exhausted|insufficient_quota|insufficient_credits|billing_not_active|billing_hard_limit|payment.?required|key limit exceeded|usage limit/i.test(
+      blob
+    )
+  ) {
+    return {
+      code: "openrouter_quota_exhausted",
+      message:
+        "OpenRouter account has no usable credit/quota for OCR. Add credits at openrouter.ai for the OPENROUTER_API_KEY on the API host, then retry.",
+      status: 502,
+      openrouterStatus,
+      openrouterCode
     };
   }
   if (
-    openaiStatus === 429 ||
-    /rate_limit|too_many_requests/i.test(`${openaiCode} ${raw}`)
+    openrouterStatus === 429 ||
+    /rate_limit|too_many_requests|temporarily rate-limited/i.test(blob)
   ) {
     return {
-      code: "openai_rate_limited",
-      message: "OpenAI is temporarily rate-limiting scans. Wait a minute and try again.",
+      code: "openrouter_rate_limited",
+      message:
+        "OpenRouter is temporarily rate-limiting scans. Wait a minute and try again.",
       status: 429,
-      openaiStatus,
-      openaiCode
+      openrouterStatus,
+      openrouterCode
     };
   }
-  if (/model|not.?found|does not exist/i.test(`${openaiCode} ${raw}`)) {
+  if (/model|not.?found|does not exist|no endpoints found/i.test(blob)) {
     return {
-      code: "openai_model_invalid",
+      code: "openrouter_model_invalid",
       message:
-        "OpenAI model is invalid. Check OPENAI_MODEL on the API host (e.g. gpt-4.1-mini).",
+        "OpenRouter model is invalid or unavailable. Check OPENROUTER_MODEL on the API host (e.g. openai/gpt-4o-mini).",
       status: 502,
-      openaiStatus,
-      openaiCode
+      openrouterStatus,
+      openrouterCode
     };
   }
   if (
     /invalid_image|image_url|timeout while downloading|download|fetch.*image|unsupported.*image/i.test(
-      `${openaiCode} ${raw}`
+      blob
     )
   ) {
     return {
-      code: "openai_image_unreadable",
+      code: "openrouter_image_unreadable",
       message:
-        "OpenAI could not read the receipt image. Re-upload as JPEG/PNG (not HEIC), or try again.",
+        "OpenRouter could not read the receipt image. Re-upload as JPEG/PNG (not HEIC), or try again.",
       status: 422,
-      openaiStatus,
-      openaiCode
+      openrouterStatus,
+      openrouterCode
     };
   }
-  if (/openai_empty_output|openai_bad_json/i.test(`${openaiCode} ${raw}`)) {
+  if (/openrouter_empty_output|openrouter_bad_json/i.test(blob)) {
     return {
-      code: "openai_bad_output",
-      message: "OpenAI returned an unusable OCR result. Try a clearer photo.",
+      code: "openrouter_bad_output",
+      message: "OpenRouter returned an unusable OCR result. Try a clearer photo.",
       status: 502,
-      openaiStatus,
-      openaiCode
+      openrouterStatus,
+      openrouterCode
     };
   }
   if (/ZodError|invalid_type|too_small/i.test(`${anyErr?.name ?? ""} ${raw}`)) {
@@ -124,15 +132,15 @@ export function classifyOpenAiError(err: unknown): {
       code: "ocr_schema_mismatch",
       message: "OCR result did not match the expected format. Try again or add items manually.",
       status: 502,
-      openaiStatus,
-      openaiCode
+      openrouterStatus,
+      openrouterCode
     };
   }
   return {
     code: "ocr_failed",
     message: "OCR failed. Try a clearer photo or add items manually.",
     status: 502,
-    openaiStatus,
-    openaiCode
+    openrouterStatus,
+    openrouterCode
   };
 }

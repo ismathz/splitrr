@@ -22,7 +22,7 @@ const parsedReceiptSchema = z.object({
   )
 });
 
-const OPENAI_IMAGE_MIMES = new Set([
+const OCR_IMAGE_MIMES = new Set([
   "image/jpeg",
   "image/jpg",
   "image/png",
@@ -30,7 +30,56 @@ const OPENAI_IMAGE_MIMES = new Set([
   "image/gif"
 ]);
 
-export function toOpenAiImageDataUrl(
+const RECEIPT_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    merchantName: { type: ["string", "null"] },
+    currency: { type: "string" },
+    subtotalCents: { type: ["integer", "null"] },
+    taxCents: { type: ["integer", "null"] },
+    tipCents: { type: ["integer", "null"] },
+    totalCents: { type: ["integer", "null"] },
+    rawText: { type: "string" },
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: { type: "string" },
+          qty: { type: "number" },
+          unitPriceCents: { type: "integer" },
+          totalPriceCents: { type: "integer" },
+          confidence: { type: "number" }
+        },
+        required: [
+          "name",
+          "qty",
+          "unitPriceCents",
+          "totalPriceCents",
+          "confidence"
+        ]
+      }
+    }
+  },
+  required: [
+    "merchantName",
+    "currency",
+    "subtotalCents",
+    "taxCents",
+    "tipCents",
+    "totalCents",
+    "rawText",
+    "items"
+  ]
+} as const;
+
+const SYSTEM_PROMPT =
+  "Extract receipt line-items and totals. Return strict JSON matching schema. Prices must be in cents. Set currency to the ISO 4217 three-letter code implied by the receipt (symbols, text, or country context), e.g. USD, EUR, MVR. If the image is blank, too dark, too blurry, or has no readable receipt text, do not guess. In that case return merchantName=null, rawText='', items=[], subtotalCents=null, taxCents=null, tipCents=null, totalCents=null.";
+
+/** Build a base64 data URL for vision OCR (OpenRouter cannot fetch private R2 URLs). */
+export function toOcrImageDataUrl(
   bytes: Uint8Array,
   contentType: string
 ): { ok: true; dataUrl: string; mime: string } | { ok: false; message: string } {
@@ -44,7 +93,7 @@ export function toOpenAiImageDataUrl(
         "HEIC/HEIF receipts are not supported for scanning. Please re-take or export the photo as JPEG or PNG."
     };
   }
-  if (!OPENAI_IMAGE_MIMES.has(mime)) {
+  if (!OCR_IMAGE_MIMES.has(mime)) {
     return {
       ok: false,
       message: `Unsupported image type for OCR (${mime}). Upload a JPEG, PNG, or WebP.`
@@ -54,109 +103,73 @@ export function toOpenAiImageDataUrl(
   return { ok: true, dataUrl: `data:${mime};base64,${b64}`, mime };
 }
 
-export class OpenAiOcrProvider {
+/** @deprecated Use toOcrImageDataUrl */
+export const toOpenAiImageDataUrl = toOcrImageDataUrl;
+
+export class OpenRouterOcrProvider {
   private readonly client: OpenAI;
 
   constructor(
     private readonly apiKey: string,
-    private readonly model: string
+    private readonly model: string,
+    baseUrl: string,
+    opts?: { referer?: string; title?: string }
   ) {
-    this.client = new OpenAI({ apiKey: this.apiKey });
+    this.client = new OpenAI({
+      apiKey: this.apiKey,
+      baseURL: baseUrl.replace(/\/$/, ""),
+      defaultHeaders: {
+        ...(opts?.referer ? { "HTTP-Referer": opts.referer } : {}),
+        ...(opts?.title ? { "X-Title": opts.title } : {})
+      }
+    });
   }
 
   /**
-   * Prefer a data URL (base64). OpenAI often fails to fetch private R2/S3 signed URLs
-   * (`Timeout while downloading` / `invalid_image_url`).
+   * Prefer a data URL (base64). OpenRouter/upstream often fails to fetch private
+   * R2/S3 signed URLs (`Timeout while downloading` / `invalid_image_url`).
    */
   async parseReceiptFromImageUrl(imageUrl: string): Promise<ParsedReceipt> {
-    const response = await this.client.responses.create({
+    const response = await this.client.chat.completions.create({
       model: this.model,
-      input: [
-        {
-          role: "system",
-          content:
-            "Extract receipt line-items and totals. Return strict JSON matching schema. Prices must be in cents. Set currency to the ISO 4217 three-letter code implied by the receipt (symbols, text, or country context), e.g. USD, EUR, MVR. If the image is blank, too dark, too blurry, or has no readable receipt text, do not guess. In that case return merchantName=null, rawText='', items=[], subtotalCents=null, taxCents=null, tipCents=null, totalCents=null."
-        },
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
         {
           role: "user",
           content: [
             {
-              type: "input_text",
+              type: "text",
               text: "Parse this receipt image into structured bill data."
             },
             {
-              type: "input_image",
-              image_url: imageUrl,
-              detail: "auto"
+              type: "image_url",
+              image_url: { url: imageUrl }
             }
           ]
         }
       ],
-      text: {
-        format: {
-          type: "json_schema",
+      response_format: {
+        type: "json_schema",
+        json_schema: {
           name: "parsed_receipt",
           strict: true,
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              merchantName: { type: ["string", "null"] },
-              currency: { type: "string" },
-              subtotalCents: { type: ["integer", "null"] },
-              taxCents: { type: ["integer", "null"] },
-              tipCents: { type: ["integer", "null"] },
-              totalCents: { type: ["integer", "null"] },
-              rawText: { type: "string" },
-              items: {
-                type: "array",
-                items: {
-                  type: "object",
-                  additionalProperties: false,
-                  properties: {
-                    name: { type: "string" },
-                    qty: { type: "number" },
-                    unitPriceCents: { type: "integer" },
-                    totalPriceCents: { type: "integer" },
-                    confidence: { type: "number" }
-                  },
-                  required: [
-                    "name",
-                    "qty",
-                    "unitPriceCents",
-                    "totalPriceCents",
-                    "confidence"
-                  ]
-                }
-              }
-            },
-            required: [
-              "merchantName",
-              "currency",
-              "subtotalCents",
-              "taxCents",
-              "tipCents",
-              "totalCents",
-              "rawText",
-              "items"
-            ]
-          }
+          schema: RECEIPT_JSON_SCHEMA
         }
       }
     });
 
-    const rawText = response.output_text;
+    const rawText = response.choices[0]?.message?.content;
     if (!rawText?.trim()) {
-      throw Object.assign(new Error("OpenAI returned empty OCR output"), {
-        code: "openai_empty_output"
+      throw Object.assign(new Error("OpenRouter returned empty OCR output"), {
+        code: "openrouter_empty_output"
       });
     }
     let payload: unknown;
     try {
       payload = JSON.parse(rawText);
     } catch {
-      throw Object.assign(new Error("OpenAI returned non-JSON OCR output"), {
-        code: "openai_bad_json"
+      throw Object.assign(new Error("OpenRouter returned non-JSON OCR output"), {
+        code: "openrouter_bad_json"
       });
     }
     const parsed = parsedReceiptSchema.parse(payload);
