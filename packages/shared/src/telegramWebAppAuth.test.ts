@@ -218,6 +218,22 @@ describe("parse helpers", () => {
     expect(parseBillIdFromStartParam(encoded)).toBe("bill-abc");
   });
 
+  it("decodes bid without Node Buffer (Mini App / WebView)", () => {
+    const encoded = encodeStartParamPayload({
+      cid: "-1001",
+      bid: "bill-webview"
+    });
+    const original = globalThis.Buffer;
+    // @ts-expect-error intentional: simulate browser bundle without Buffer
+    delete (globalThis as { Buffer?: unknown }).Buffer;
+    try {
+      expect(parseBillIdFromStartParam(encoded)).toBe("bill-webview");
+      expect(parseChatIdFromStartParam(encoded)).toBe("-1001");
+    } finally {
+      (globalThis as { Buffer?: typeof original }).Buffer = original;
+    }
+  });
+
   it("prefers chat.id over start_param", () => {
     const initData = new URLSearchParams({
       chat: JSON.stringify({ id: -55, title: "Dinner" }),

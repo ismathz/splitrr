@@ -156,6 +156,37 @@ export type StartParamPayload = {
   members?: string[];
 };
 
+/**
+ * UTF-8 ↔ base64url without depending on Node `Buffer`.
+ * Mini App bundles import these parsers; Vite does not polyfill Buffer.
+ */
+function utf8ToBase64Url(text: string): string {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(text, "utf8").toString("base64url");
+  }
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlToUtf8(raw: string): string | null {
+  try {
+    const pad =
+      raw.length % 4 === 0 ? "" : "=".repeat(4 - (raw.length % 4));
+    const b64 = raw.replace(/-/g, "+").replace(/_/g, "/") + pad;
+    if (typeof Buffer !== "undefined") {
+      return Buffer.from(b64, "base64").toString("utf8");
+    }
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
 /** Base64url JSON for `tgWebAppStartParam` / `start_param` / `startapp`. */
 export function encodeStartParamPayload(payload: StartParamPayload): string {
   let json = JSON.stringify(payload);
@@ -167,7 +198,7 @@ export function encodeStartParamPayload(payload: StartParamPayload): string {
         : { cid: payload.cid }
     );
   }
-  return Buffer.from(json, "utf8").toString("base64url");
+  return utf8ToBase64Url(json);
 }
 
 function parseStartParamObject(raw: string): Record<string, unknown> | null {
@@ -189,17 +220,9 @@ function parseStartParamObject(raw: string): Record<string, unknown> | null {
   const direct = tryJson(trimmed);
   if (direct) return direct;
 
-  try {
-    const pad =
-      trimmed.length % 4 === 0 ? "" : "=".repeat(4 - (trimmed.length % 4));
-    const decoded = Buffer.from(
-      trimmed.replace(/-/g, "+").replace(/_/g, "/") + pad,
-      "base64"
-    ).toString("utf8");
-    return tryJson(decoded);
-  } catch {
-    return null;
-  }
+  const decoded = base64UrlToUtf8(trimmed);
+  if (!decoded) return null;
+  return tryJson(decoded);
 }
 
 /**

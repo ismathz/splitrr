@@ -12,13 +12,17 @@ export function AppShell() {
 
   useEffect(() => {
     if (didRouteBillDeepLink.current) return;
+    // start_param is base64url JSON `{cid,bid}`; decode must work in the
+    // Telegram WebView (no Node Buffer — see shared base64url helpers).
     const billId = launchCtx.startParam
       ? parseBillIdFromStartParam(launchCtx.startParam)
       : null;
     if (!billId) return;
 
-    // Only auto-route from home (announce/share opens Mini App on `/`).
-    if (pathname !== "/") return;
+    if (pathname === `/bills/${billId}`) {
+      didRouteBillDeepLink.current = true;
+      return;
+    }
 
     didRouteBillDeepLink.current = true;
     void navigate({
