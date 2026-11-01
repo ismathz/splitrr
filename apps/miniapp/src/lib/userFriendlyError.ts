@@ -157,6 +157,7 @@ function pipelineErrorMessage(
     code === "ocr_schema_mismatch" ||
     code === "unsupported_ocr_mime" ||
     code === "create_bill_failed" ||
+    code === "create_bill_fk" ||
     code === "missing_storage_key"
   ) {
     return detail ?? "Receipt upload or scan failed. Try again in a moment.";
