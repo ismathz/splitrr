@@ -1,7 +1,11 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { normalizeTelegramBotToken } from "./telegramToken";
 
 /** Default max age for Telegram WebApp initData (24h). */
 export const DEFAULT_INIT_DATA_MAX_AGE_SEC = 24 * 60 * 60;
+
+/** Marker returned by /health so we can confirm the corrected HMAC is live. */
+export const WEBAPP_HMAC_ALGO = "WebAppData-as-key-v1";
 
 export interface TelegramWebAppUser {
   id: number;
@@ -53,7 +57,7 @@ export function validateWebAppInitDataDetailed(
   // secret_key = HMAC-SHA256(bot_token) with key "WebAppData"
   // (Telegram: "signature of the bot's token with … WebAppData used as a key")
   const secretKey = createHmac("sha256", "WebAppData")
-    .update(botToken.trim())
+    .update(normalizeTelegramBotToken(botToken))
     .digest();
   const calculated = createHmac("sha256", secretKey)
     .update(dataCheckString)

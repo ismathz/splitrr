@@ -1,12 +1,14 @@
 import type { Context, Next } from "hono";
 import {
   parseTelegramUserFromInitData,
+  telegramTokenFingerprint,
   validateWebAppInitDataDetailed,
   type TelegramWebAppUser
 } from "@splitbot/shared";
 import { env } from "./env";
 import {
-  asInitDataString,
+  collectInitDataCandidates,
+  expandInitDataVariants,
   readInitDataFromHeaders,
   readInitDataFromQuery
 } from "./authInitData";
@@ -25,72 +27,101 @@ declare module "hono" {
 
 export { readInitDataFromHeaders, readInitDataFromQuery } from "./authInitData";
 
+async function maybeParseMultipart(
+  c: Context
+): Promise<Record<string, string | File> | null> {
+  const contentType = c.req.header("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("multipart/form-data")) {
+    return null;
+  }
+  try {
+    const parsed = await c.req.parseBody({ all: true });
+    const flat: Record<string, string | File> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (Array.isArray(value)) {
+        const first = value[0];
+        if (typeof first === "string" || first instanceof File) {
+          flat[key] = first;
+        }
+      } else if (typeof value === "string" || value instanceof File) {
+        flat[key] = value;
+      }
+    }
+    return flat;
+  } catch (err) {
+    console.warn("[auth] multipart parse for initData failed", err);
+    return null;
+  }
+}
+
 /**
  * Require valid Telegram WebApp initData on `/api/*` (except cron routes).
- * In development, `SPLITBOT_DEV_AUTH_BYPASS=true` allows unauthenticated local use.
  *
- * Accepts initData from (in order):
- * 1. `Authorization: tma <initData>`
- * 2. `X-Telegram-Init-Data`
- * 3. Query `tgWebAppData` / `initData` (multipart-safe fallback)
- * 4. Multipart field `initData` / `_telegram_init_data` (Telegram WebViews often
- *    mangle custom headers on FormData uploads)
+ * Tries every carrier (Authorization, header, query, form) and encoding
+ * variant until one HMAC-validates. First-non-empty was wrong when WebViews
+ * mangled headers but left FormData intact.
  */
 export async function requireTelegramAuth(c: Context, next: Next) {
   if (c.req.method === "OPTIONS") {
     return next();
   }
 
-  c.set("parsedMultipart", null);
+  const multipart = await maybeParseMultipart(c);
+  c.set("parsedMultipart", multipart);
 
-  let initData =
-    readInitDataFromHeaders(c) || readInitDataFromQuery(c) || null;
+  const candidates = collectInitDataCandidates(c, multipart);
+  const token = env.TELEGRAM_BOT_TOKEN;
+  const tokenFp = telegramTokenFingerprint(token);
 
-  const contentType = c.req.header("content-type") ?? "";
-  if (
-    !initData &&
-    contentType.toLowerCase().includes("multipart/form-data")
-  ) {
-    try {
-      const parsed = await c.req.parseBody({ all: true });
-      const flat: Record<string, string | File> = {};
-      for (const [key, value] of Object.entries(parsed)) {
-        if (Array.isArray(value)) {
-          const first = value[0];
-          if (typeof first === "string" || first instanceof File) {
-            flat[key] = first;
-          }
-        } else if (typeof value === "string" || value instanceof File) {
-          flat[key] = value;
+  if (token && candidates.length > 0) {
+    const attempts: Array<{
+      source: string;
+      reason: string;
+      len: number;
+    }> = [];
+
+    for (const candidate of candidates) {
+      for (const variant of expandInitDataVariants(candidate.value)) {
+        const result = validateWebAppInitDataDetailed(variant, token);
+        attempts.push({
+          source: candidate.source,
+          reason: result.ok ? "ok" : result.reason,
+          len: variant.length
+        });
+        if (result.ok) {
+          const user = parseTelegramUserFromInitData(variant);
+          c.set("telegramUser", user);
+          c.set("initData", variant);
+          c.set("authMode", "init_data");
+          return next();
         }
       }
-      c.set("parsedMultipart", flat);
-      initData =
-        asInitDataString(flat.initData) ||
-        asInitDataString(flat._telegram_init_data) ||
-        null;
-    } catch (err) {
-      console.warn("[auth] multipart parse for initData failed", err);
     }
-  }
 
-  if (initData && env.TELEGRAM_BOT_TOKEN) {
-    const result = validateWebAppInitDataDetailed(
-      initData,
-      env.TELEGRAM_BOT_TOKEN
+    // Prefer actionable reasons when every carrier fails (token mismatch → bad_hash).
+    const reason =
+      attempts.find((a) => a.reason === "bad_hash")?.reason ??
+      attempts.find((a) => a.reason === "expired")?.reason ??
+      attempts.find((a) => a.reason === "auth_date_in_future")?.reason ??
+      attempts[attempts.length - 1]?.reason ??
+      "bad_hash";
+
+    console.warn("[auth] invalid_init_data", {
+      botId: tokenFp.botId,
+      tokenSuffix: tokenFp.tokenSuffix,
+      reason,
+      attempts
+    });
+    return c.json(
+      {
+        error: "invalid_init_data",
+        reason,
+        attempts,
+        tokenBotId: tokenFp.botId,
+        tokenSuffix: tokenFp.tokenSuffix
+      },
+      401
     );
-    if (!result.ok) {
-      console.warn("[auth] invalid_init_data", result.reason);
-      return c.json(
-        { error: "invalid_init_data", reason: result.reason },
-        401
-      );
-    }
-    const user = parseTelegramUserFromInitData(initData);
-    c.set("telegramUser", user);
-    c.set("initData", initData);
-    c.set("authMode", "init_data");
-    return next();
   }
 
   if (env.SPLITBOT_DEV_AUTH_BYPASS) {
@@ -100,7 +131,19 @@ export async function requireTelegramAuth(c: Context, next: Next) {
     return next();
   }
 
-  return c.json({ error: "missing_init_data" }, 401);
+  console.warn("[auth] missing_init_data", {
+    botId: tokenFp.botId,
+    hasToken: Boolean(token),
+    candidateCount: candidates.length
+  });
+  return c.json(
+    {
+      error: "missing_init_data",
+      tokenBotId: tokenFp.botId,
+      tokenSuffix: tokenFp.tokenSuffix
+    },
+    401
+  );
 }
 
 /** Protect cron-style endpoints with a shared secret header. */

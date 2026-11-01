@@ -24,6 +24,7 @@ import {
 } from "./announce";
 import { authorizeRosterChatAccess } from "./roster";
 import { backfillRosterFromBotApi } from "./telegramRosterBackfill";
+import { buildTelegramDiag, type TelegramDiag } from "./telegramDiag";
 
 const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
@@ -139,7 +140,53 @@ app.onError((err, c) => {
   return c.json({ error: "internal_error" }, 500);
 });
 
-app.get("/health", (c) => c.json({ ok: true }));
+let telegramDiagCache: TelegramDiag | null = null;
+let telegramDiagLoadedAt = 0;
+
+async function getTelegramDiagCached(): Promise<TelegramDiag> {
+  const now = Date.now();
+  if (telegramDiagCache && now - telegramDiagLoadedAt < 60_000) {
+    return telegramDiagCache;
+  }
+  telegramDiagCache = await buildTelegramDiag({
+    botToken: env.TELEGRAM_BOT_TOKEN,
+    expectedUsername: env.TELEGRAM_BOT_USERNAME
+  });
+  telegramDiagLoadedAt = now;
+  console.info("[api] telegram diag", {
+    gitSha: telegramDiagCache.gitSha,
+    hmacAlgo: telegramDiagCache.hmacAlgo,
+    botId: telegramDiagCache.token.botId,
+    tokenSuffix: telegramDiagCache.token.tokenSuffix,
+    getMe: telegramDiagCache.getMe,
+    tokenMatchesExpectedBot: telegramDiagCache.tokenMatchesExpectedBot
+  });
+  return telegramDiagCache;
+}
+
+// Warm diag at boot (non-blocking).
+void getTelegramDiagCached().catch((err) =>
+  console.warn("[api] telegram diag warm failed", err)
+);
+
+app.get("/health", async (c) => {
+  const telegram = await getTelegramDiagCached();
+  return c.json({
+    ok: true,
+    gitSha: telegram.gitSha,
+    hmacAlgo: telegram.hmacAlgo,
+    telegram: {
+      botId: telegram.token.botId,
+      tokenSuffix: telegram.token.tokenSuffix,
+      expectedUsername: telegram.expectedUsername,
+      getMeUsername: telegram.getMe.username ?? null,
+      getMeId: telegram.getMe.id ?? null,
+      getMeOk: telegram.getMe.ok,
+      getMeError: telegram.getMe.error ?? null,
+      tokenMatchesExpectedBot: telegram.tokenMatchesExpectedBot
+    }
+  });
+});
 
 app.use("/api/reminders/*", requireCronSecret);
 app.use("/api/*", async (c, next) => {

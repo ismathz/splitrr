@@ -30,7 +30,13 @@ const envSchema = z
     S3_ACCESS_KEY_ID: z.string().min(1),
     S3_SECRET_ACCESS_KEY: z.string().min(1),
     S3_KEY_PREFIX: z.string().default("receipts"),
-    TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
+    TELEGRAM_BOT_TOKEN: z
+      .string()
+      .min(1)
+      .optional()
+      .transform((v) =>
+        v == null ? v : v.trim().replace(/^["']|["']$/g, "")
+      ),
     TELEGRAM_WEBAPP_URL: z.string().url().optional(),
     /** Bot username without `@` for announce deep links (default @SplitrrBot). */
     TELEGRAM_BOT_USERNAME: z.string().min(1).default("SplitrrBot"),
