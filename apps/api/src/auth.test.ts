@@ -17,8 +17,8 @@ function signInitData(
     .filter(([k]) => k !== "hash" && k !== "signature")
     .sort(([a], [b]) => a.localeCompare(b));
   const dataCheckString = pairs.map(([k, v]) => `${k}=${v}`).join("\n");
-  const secretKey = createHmac("sha256", botToken)
-    .update("WebAppData")
+  const secretKey = createHmac("sha256", "WebAppData")
+    .update(botToken)
     .digest();
   const hash = createHmac("sha256", secretKey)
     .update(dataCheckString)

@@ -420,7 +420,6 @@ export function BillEditor(props: BillEditorProps) {
   const [membersDrawerOpen, setMembersDrawerOpen] = useState(false);
   const [currencyDrawerOpen, setCurrencyDrawerOpen] = useState(false);
   const [currencyFilter, setCurrencyFilter] = useState("");
-  const [memberFilter, setMemberFilter] = useState("");
   const [manualMemberInput, setManualMemberInput] = useState("");
   const [manualMemberError, setManualMemberError] = useState<string | null>(
     null,
@@ -747,22 +746,10 @@ export function BillEditor(props: BillEditorProps) {
     return [...fromGroup, ...fromManual];
   }, [groupMemberNames, billMembers]);
 
-  const filteredGroupMembersForDrawer = useMemo(() => {
-    const q = memberFilter.trim().toLowerCase();
-    if (!q) return groupMemberNames;
-    return groupMemberNames.filter((m) => m.toLowerCase().includes(q));
-  }, [groupMemberNames, memberFilter]);
-
   const manualOnlyBillMembers = useMemo(
     () => billMembers.filter((m) => !isNameInGroup(m, groupMemberNames)),
     [billMembers, groupMemberNames],
   );
-
-  const filteredManualMembersForDrawer = useMemo(() => {
-    const q = memberFilter.trim().toLowerCase();
-    if (!q) return manualOnlyBillMembers;
-    return manualOnlyBillMembers.filter((m) => m.toLowerCase().includes(q));
-  }, [manualOnlyBillMembers, memberFilter]);
 
   const filteredCurrencyOptions = useMemo(() => {
     const q = currencyFilter.trim().toLowerCase();
@@ -792,7 +779,6 @@ export function BillEditor(props: BillEditorProps) {
   };
 
   const openMembersDrawer = () => {
-    setMemberFilter("");
     setManualMemberInput("");
     setManualMemberError(null);
     setMembersDrawerOpen(true);
@@ -1645,7 +1631,12 @@ export function BillEditor(props: BillEditorProps) {
         </div>
       </div>
 
-      <div className={cn("space-y-2", showOnlyOcrStatus && "hidden")}>
+      <div
+        className={cn(
+          "space-y-2",
+          (showOnlyOcrStatus || items.length === 0) && "hidden",
+        )}
+      >
         <div>
           <CardTitle className="text-xl">Charges & Tax</CardTitle>
           <CardDescription>Service fees, taxes, and discounts</CardDescription>
@@ -2206,7 +2197,12 @@ export function BillEditor(props: BillEditorProps) {
         </Card>
       </div>
 
-      <div className={cn("space-y-2", showOnlyOcrStatus && "hidden")}>
+      <div
+        className={cn(
+          "space-y-2",
+          (showOnlyOcrStatus || items.length === 0) && "hidden",
+        )}
+      >
         <div>
           <CardTitle className="text-xl">Split breakdown</CardTitle>
           <CardDescription>Amount each person owes.</CardDescription>
@@ -2284,10 +2280,8 @@ export function BillEditor(props: BillEditorProps) {
           <DrawerHeader>
             <DrawerTitle>Bill members</DrawerTitle>
             <DrawerDescription>
-              {groupMembers.length <= AUTO_FILL_MAX_GROUP_SIZE &&
-              groupMembers.length > 0
-                ? "Small groups include everyone by default. Toggle people who aren't splitting, or add someone by name."
-                : "Choose who can be assigned to line items. You're selected by default — add missing people by name if they aren't in the roster yet."}
+              Choose who can be assigned to line items. Add missing people by
+              name if they aren't in the roster yet.
               {groupUnseenCount != null && groupUnseenCount > 0
                 ? ` About ${groupUnseenCount} group member${
                     groupUnseenCount === 1 ? "" : "s"
@@ -2325,26 +2319,14 @@ export function BillEditor(props: BillEditorProps) {
               </Button>
             </div>
             <FormErrorAlert message={manualMemberError} />
-            <div>
-              <label className="sr-only" htmlFor="member-filter">
-                Filter members
-              </label>
-              <input
-                id="member-filter"
-                value={memberFilter}
-                onChange={(e) => setMemberFilter(e.target.value)}
-                placeholder="Filter by name…"
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              />
-            </div>
           </div>
           <div className="max-h-[min(50vh,22rem)] space-y-4 overflow-y-auto px-4 pb-4">
-            {filteredManualMembersForDrawer.length > 0 ? (
+            {manualOnlyBillMembers.length > 0 ? (
               <div className="space-y-1">
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Added manually
                 </div>
-                {filteredManualMembersForDrawer.map((member) => {
+                {manualOnlyBillMembers.map((member) => {
                   const checked = billMembers.includes(member);
                   const id = `bill-members-manual-${member}`;
                   return (
@@ -2414,12 +2396,8 @@ export function BillEditor(props: BillEditorProps) {
                     </>
                   ) : null}
                 </p>
-              ) : filteredGroupMembersForDrawer.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No matching names.
-                </p>
               ) : (
-                filteredGroupMembersForDrawer.map((member) => {
+                groupMemberNames.map((member) => {
                   const checked = billMembers.includes(member);
                   const id = `bill-members-group-${member}`;
                   return (
