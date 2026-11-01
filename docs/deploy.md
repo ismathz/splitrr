@@ -87,7 +87,13 @@ Public URL: https://splitrr.ismath.dev (Cloudflare Tunnel via `cloudflared-split
 - Runtime `.env` on the VPS is operator-managed; deploys must not overwrite it
 
 ## Telegram webhook
-Register the webhook (path includes secret; also pass the same value as `secret_token`):
+The bot **re-registers the webhook on every boot** (`ensureTelegramWebhook`) with:
+
+`allowed_updates`: `message`, `edited_message`, `callback_query`, `my_chat_member`, `chat_member`
+
+URL: `{origin(TELEGRAM_WEBAPP_URL)}/webhook/{TELEGRAM_WEBHOOK_SECRET}` + matching `secret_token`.
+
+Default Telegram webhooks **omit** `chat_member`; without an explicit list, join/leave never arrives even when the bot is a group admin. Deploy restart is enough — no manual curl required after privacy changes. Manual register (same payload the bot sends):
 
 ```bash
 curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
@@ -95,7 +101,7 @@ curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
   -d "{\"url\":\"https://<host>/webhook/${TELEGRAM_WEBHOOK_SECRET}\",\"secret_token\":\"${TELEGRAM_WEBHOOK_SECRET}\",\"allowed_updates\":[\"message\",\"edited_message\",\"callback_query\",\"my_chat_member\",\"chat_member\"]}"
 ```
 
-Include `chat_member` so an **admin** bot receives join/leave updates for the roster. Default Telegram webhooks omit `chat_member`.
+Confirm via bot `GET /health` → `webhook.rosterUpdatesOk` / `webhook.allowedUpdates`.
 
 Point BotFather Mini App URL at the HTTPS Mini App origin (`TELEGRAM_WEBAPP_URL`, production: `https://splitrr.ismath.dev`).
 

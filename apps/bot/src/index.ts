@@ -6,6 +6,13 @@ import { createDb, GroupRepository, GroupRosterRepository } from "@splitbot/db";
 import { signAvatarRequest, verifyAvatarRequest } from "./avatarSignature";
 import { env } from "./env";
 import {
+  ensureTelegramWebhook,
+  fetchWebhookInfo,
+  ROSTER_ALLOWED_UPDATES,
+  webhookAllowsRosterUpdates,
+  type WebhookInfoSummary
+} from "./ensureTelegramWebhook";
+import {
   backfillGroupAdminsAndCount,
   ingestChatMemberUpdate,
   ingestVisibleGroupUsers
@@ -28,17 +35,23 @@ const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
 const roster = new GroupRosterRepository(db);
 
-// Persist every human the bot can see in groups (privacy mode limits this).
+console.log("[roster] SQLITE_PATH=", env.SQLITE_PATH);
+
+// Persist every human sender the bot receives in groups (needs privacy OFF
+// for ordinary messages; chat_member needs admin + webhook allowed_updates).
 bot.use(async (ctx, next) => {
   try {
     ingestVisibleGroupUsers({ ctx, groups, roster });
+    if (ctx.chatMember) {
+      ingestChatMemberUpdate({ ctx, groups, roster });
+    }
   } catch (err) {
     console.warn("[roster] ingest failed", err);
   }
   return next();
 });
 
-// Full join/leave stream — only delivered when bot is admin + webhook includes chat_member.
+// Explicit handler so chat_member updates are acknowledged even if unused elsewhere.
 bot.on("chat_member", (ctx) => {
   try {
     ingestChatMemberUpdate({ ctx, groups, roster });
@@ -46,6 +59,34 @@ bot.on("chat_member", (ctx) => {
     console.warn("[roster] chat_member ingest failed", err);
   }
 });
+
+/** Prefer mtcute avatars but never drop SQLite-only message senders. */
+function mergeMtcuteWithStoredRoster(
+  mtcuteMembers: TelegramGroupMember[],
+  stored: TelegramGroupMember[],
+): TelegramGroupMember[] {
+  const byId = new Map<number, TelegramGroupMember>();
+  for (const m of stored) {
+    byId.set(m.tgUserId, m);
+  }
+  for (const m of mtcuteMembers) {
+    const prev = byId.get(m.tgUserId);
+    if (!prev) {
+      byId.set(m.tgUserId, m);
+      continue;
+    }
+    byId.set(m.tgUserId, {
+      ...prev,
+      ...m,
+      name: m.name || prev.name,
+      avatarBgColors: m.avatarBgColors.length
+        ? m.avatarBgColors
+        : prev.avatarBgColors,
+      hasPhoto: m.hasPhoto || prev.hasPhoto
+    });
+  }
+  return [...byId.values()];
+}
 
 
 const AVATAR_SIG_TTL_SEC = 3600;
@@ -324,29 +365,28 @@ app.post("/miniapp/group-members", async (c) => {
     console.warn("[roster] mtcute group-members failed", chatId, mtcuteError);
   }
 
-  // Prefer mtcute enrichment (avatars); fall back to stored roster rows.
-  if (mtcuteMembers.length > 0) {
-    return c.json({
-      members: toPublicMembers(mtcuteMembers, chatId),
-      source: "mtcute",
-      mtcuteError: null
-    });
-  }
-
   const stored: TelegramGroupMember[] = roster.listMembers(groupId).map((m) => ({
     tgUserId: m.tgUserId,
     name: m.name,
     avatarBgColors: [],
     hasPhoto: Boolean(m.photoUrl)
   }));
+  // Merge so thin mtcute (non-admin) never hides SQLite message senders.
+  const merged = mergeMtcuteWithStoredRoster(mtcuteMembers, stored);
+  const source =
+    mtcuteMembers.length > 0 && stored.length > 0
+      ? "mtcute+roster"
+      : mtcuteMembers.length > 0
+        ? "mtcute"
+        : "roster";
   return c.json({
-    members: toPublicMembers(stored, chatId),
-    source: "roster",
+    members: toPublicMembers(merged, chatId),
+    source,
     mtcuteError,
     hint:
-      stored.length === 0
+      merged.length === 0
         ? "empty_roster"
-        : "partial_roster_privacy_or_admin"
+        : "partial_roster"
   });
 });
 
@@ -360,9 +400,41 @@ app.post(`/webhook/${env.TELEGRAM_WEBHOOK_SECRET}`, async (c) => {
   }
   return handleTelegramWebhook(c);
 });
-app.get("/health", (c) => c.json({ ok: true }));
+
+let lastWebhookInfo: WebhookInfoSummary | null = null;
+
+app.get("/health", async (c) => {
+  const info = lastWebhookInfo ?? (await fetchWebhookInfo(env.TELEGRAM_BOT_TOKEN));
+  if (info) lastWebhookInfo = info;
+  return c.json({
+    ok: true,
+    service: "bot",
+    sqlitePath: env.SQLITE_PATH,
+    webhook: {
+      url: info?.url ?? null,
+      allowedUpdates: info?.allowedUpdates ?? [],
+      rosterUpdatesOk: webhookAllowsRosterUpdates(info),
+      requiredAllowedUpdates: [...ROSTER_ALLOWED_UPDATES],
+      pendingUpdateCount: info?.pendingUpdateCount ?? null,
+      lastErrorMessage: info?.lastErrorMessage ?? null
+    }
+  });
+});
 
 await initMtcute();
+
+const webhookEnsure = await ensureTelegramWebhook({
+  botToken: env.TELEGRAM_BOT_TOKEN,
+  webhookSecret: env.TELEGRAM_WEBHOOK_SECRET,
+  webAppUrl: env.TELEGRAM_WEBAPP_URL
+});
+lastWebhookInfo = webhookEnsure.after;
+if (!webhookEnsure.ok) {
+  console.warn(
+    "[webhook] roster allowed_updates not confirmed — message/chat_member may be missing",
+    webhookEnsure.error ?? webhookEnsure.after,
+  );
+}
 
 serve({ fetch: app.fetch, port: env.BOT_PORT });
 console.log(`Bot webhook listening on ${env.BOT_PORT}`);

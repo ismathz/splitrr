@@ -67,6 +67,26 @@ describe("ingestVisibleGroupUsers", () => {
 
     expect(groups.findByTelegramChatId("42")).toBeNull();
   });
+
+  it("records edited_message senders into the roster", () => {
+    const dir = mkdtempSync(join(tmpdir(), "splitbot-bot-roster-edit-"));
+    const db = createDb(join(dir, "test.db"));
+    const groups = new GroupRepository(db);
+    const roster = new GroupRosterRepository(db);
+
+    ingestVisibleGroupUsers({
+      ctx: {
+        chat: { id: -10088, type: "supergroup" as const, title: "Crew" },
+        from: { id: 7, first_name: "Editor", is_bot: false },
+        editedMessage: { text: "hello again" }
+      } as any,
+      groups,
+      roster
+    });
+
+    const groupId = groups.findByTelegramChatId("-10088")!.id;
+    expect(roster.listMembers(groupId).map((m) => m.tgUserId)).toEqual([7]);
+  });
 });
 
 describe("ingestChatMemberUpdate", () => {
