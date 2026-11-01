@@ -165,8 +165,14 @@ function pipelineErrorMessage(
   if (code === "invalid_receipt_file" || code === "file_required") {
     return detail ?? "That image couldn’t be uploaded. Try a JPEG or PNG under 10 MB.";
   }
-  if (code === "rate_limited") {
-    return "Too many scans just now. Wait a moment and try again.";
+  if (code === "rate_limited" || code === "local_rate_limited") {
+    return detail ?? "Too many scans just now. Wait a moment and try again.";
+  }
+  if (code === "openai_quota_exhausted") {
+    return (
+      detail ??
+      "OpenAI has no credit/quota for OCR. Add billing on the API OPENAI_API_KEY, then retry."
+    );
   }
   return null;
 }

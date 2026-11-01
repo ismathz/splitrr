@@ -69,4 +69,19 @@ describe("toUserFriendlyErrorMessage auth", () => {
     );
     expect(msg.toLowerCase()).toContain("checksum");
   });
+
+  it("maps openai_quota_exhausted distinctly from rate limits", () => {
+    const msg = toUserFriendlyErrorMessage(
+      new Error(
+        JSON.stringify({
+          error:
+            "OpenAI account has no usable credit/quota for OCR. Add billing/credits for the OPENAI_API_KEY on the API host, then retry.",
+          code: "openai_quota_exhausted",
+          openaiCode: "credit_balance_exhausted",
+        }),
+      ),
+    );
+    expect(msg.toLowerCase()).toContain("credit");
+    expect(msg.toLowerCase()).not.toContain("minute");
+  });
 });

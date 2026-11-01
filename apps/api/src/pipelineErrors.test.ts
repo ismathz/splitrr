@@ -21,4 +21,23 @@ describe("classifyOpenAiError", () => {
     });
     expect(result.code).toBe("openai_auth_failed");
   });
+
+  it("does not call billing exhaustion a soft rate limit", () => {
+    const result = classifyOpenAiError({
+      status: 429,
+      code: "credit_balance_exhausted",
+      message: "You exceeded your current quota"
+    });
+    expect(result.code).toBe("openai_quota_exhausted");
+    expect(result.message.toLowerCase()).toContain("credit");
+  });
+
+  it("keeps true rate limits distinct", () => {
+    const result = classifyOpenAiError({
+      status: 429,
+      code: "rate_limit_exceeded",
+      message: "Rate limit reached"
+    });
+    expect(result.code).toBe("openai_rate_limited");
+  });
 });
