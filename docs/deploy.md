@@ -139,7 +139,9 @@ Run monthly in staging.
 ## R2 / receipt upload notes
 - API S3 client sets `requestChecksumCalculation` / `responseChecksumValidation` to `WHEN_REQUIRED` (AWS SDK v3.729+ default checksums break R2 `PutObject`).
 - Also uses `forcePathStyle: true` for R2-compatible endpoints.
-- If Mini App shows `internal_error` / storage errors while scanning: confirm `S3_ENDPOINT`, `S3_BUCKET`, keys, and that OpenAI can fetch R2 signed GET URLs.
+- OCR reads the object from R2 in-process and sends OpenAI a **base64 data URL** (OpenAI often cannot fetch private R2 signed URLs — `Timeout while downloading` / `invalid_image_url`).
+- Prefer JPEG/PNG/WebP for scans; HEIC/HEIF is rejected at OCR with a clear error.
+- Dig failures: `curl -fsS https://splitrr.ismath.dev/api/pipeline/last-failures`
 
 ## R2 Lifecycle Recommendations
 - Keep receipt bucket private; serve files with signed URLs only

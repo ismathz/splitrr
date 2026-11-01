@@ -22,6 +22,38 @@ const parsedReceiptSchema = z.object({
   )
 });
 
+const OPENAI_IMAGE_MIMES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif"
+]);
+
+export function toOpenAiImageDataUrl(
+  bytes: Uint8Array,
+  contentType: string
+): { ok: true; dataUrl: string; mime: string } | { ok: false; message: string } {
+  let mime = (contentType || "").toLowerCase().trim() || "application/octet-stream";
+  if (mime === "image/jpg") mime = "image/jpeg";
+  if (mime === "application/octet-stream") mime = "image/jpeg";
+  if (mime === "image/heic" || mime === "image/heif") {
+    return {
+      ok: false,
+      message:
+        "HEIC/HEIF receipts are not supported for scanning. Please re-take or export the photo as JPEG or PNG."
+    };
+  }
+  if (!OPENAI_IMAGE_MIMES.has(mime)) {
+    return {
+      ok: false,
+      message: `Unsupported image type for OCR (${mime}). Upload a JPEG, PNG, or WebP.`
+    };
+  }
+  const b64 = Buffer.from(bytes).toString("base64");
+  return { ok: true, dataUrl: `data:${mime};base64,${b64}`, mime };
+}
+
 export class OpenAiOcrProvider {
   private readonly client: OpenAI;
 
@@ -32,6 +64,10 @@ export class OpenAiOcrProvider {
     this.client = new OpenAI({ apiKey: this.apiKey });
   }
 
+  /**
+   * Prefer a data URL (base64). OpenAI often fails to fetch private R2/S3 signed URLs
+   * (`Timeout while downloading` / `invalid_image_url`).
+   */
   async parseReceiptFromImageUrl(imageUrl: string): Promise<ParsedReceipt> {
     const response = await this.client.responses.create({
       model: this.model,
@@ -111,9 +147,18 @@ export class OpenAiOcrProvider {
 
     const rawText = response.output_text;
     if (!rawText?.trim()) {
-      throw new Error("OpenAI returned empty OCR output");
+      throw Object.assign(new Error("OpenAI returned empty OCR output"), {
+        code: "openai_empty_output"
+      });
     }
-    const payload = JSON.parse(rawText);
+    let payload: unknown;
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      throw Object.assign(new Error("OpenAI returned non-JSON OCR output"), {
+        code: "openai_bad_json"
+      });
+    }
     const parsed = parsedReceiptSchema.parse(payload);
     return {
       merchantName: parsed.merchantName ?? undefined,

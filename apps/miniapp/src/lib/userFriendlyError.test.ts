@@ -45,6 +45,19 @@ describe("toUserFriendlyErrorMessage auth", () => {
     expect(msg.toLowerCase()).toContain("storage");
   });
 
+  it("maps onError code Error + receipt message", () => {
+    const msg = toUserFriendlyErrorMessage(
+      new Error(
+        JSON.stringify({
+          error: "internal_error",
+          code: "Error",
+          message: "Something went wrong while processing the receipt.",
+        }),
+      ),
+    );
+    expect(msg.toLowerCase()).toContain("receipt");
+  });
+
   it("maps storage_checksum_rejected", () => {
     const msg = toUserFriendlyErrorMessage(
       new Error(

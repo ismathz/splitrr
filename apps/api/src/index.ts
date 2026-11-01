@@ -11,7 +11,7 @@ import {
 import type { ParsedReceipt, ParsedReceiptAdjustment } from "@splitbot/shared";
 import { env } from "./env";
 import { classifyStorageError, StorageService } from "./storage";
-import { OpenAiOcrProvider } from "./ocr";
+import { OpenAiOcrProvider, toOpenAiImageDataUrl } from "./ocr";
 import { requireCronSecret, requireTelegramAuth } from "./auth";
 import { RateLimiter } from "./rateLimit";
 import { validateReceiptFile } from "./receiptValidation";
@@ -144,17 +144,45 @@ app.onError((err, c) => {
   console.error("[api]", err);
   const name = err instanceof Error ? err.name : "Error";
   const message = err instanceof Error ? err.message : String(err);
-  // Never leak stacks/secrets; surface a short code for Mini App / dig.
+  const storageHit =
+    /S3|NoSuchBucket|AccessDenied|checksum|ECONNREFUSED|ENOTFOUND|storage_/i.test(
+      `${name} ${message}`
+    );
+  const openaiHit = /OpenAI|openai|invalid_image|Timeout while downloading/i.test(
+    `${name} ${message}`
+  );
+  const code = storageHit
+    ? "storage_uncaught"
+    : openaiHit
+      ? "openai_uncaught"
+      : "internal_error";
+  const userMessage = storageHit
+    ? "Receipt storage failed unexpectedly. Check S3/R2 env and /api/pipeline/last-failures."
+    : openaiHit
+      ? "Receipt OCR failed unexpectedly. Check OPENAI_API_KEY / model and retry as JPEG/PNG."
+      : "Something went wrong while processing the receipt.";
+
+  try {
+    recordPipelineFailure({
+      stage: c.req.path.includes("/ocr")
+        ? "ocr"
+        : c.req.path.includes("/receipt")
+          ? "upload"
+          : "create_bill",
+      path: c.req.path,
+      code,
+      message: userMessage,
+      httpStatus: 500
+    });
+  } catch {
+    /* ignore dig ring failures */
+  }
+
   return c.json(
     {
       error: "internal_error",
-      code: name,
-      message:
-        /S3|NoSuchBucket|AccessDenied|checksum|OpenAI|ECONNREFUSED|ENOTFOUND/i.test(
-          `${name} ${message}`
-        )
-          ? "Storage or OCR backend failed. Check API logs /api/pipeline/last-failures."
-          : "Something went wrong while processing the receipt."
+      code,
+      message: userMessage
     },
     500
   );
@@ -264,34 +292,65 @@ app.get("/api/pipeline/last-failures", (c) =>
 );
 
 app.post("/api/bills", async (c) => {
-  const body = await c.req.json<{
-    telegramChatId: string;
-    groupTitle: string;
-    title: string;
-    createdByUserId?: number;
-    /** ISO date YYYY-MM-DD */
-    billDate?: string;
-    place?: string | null;
-    /** ISO 4217 code for manual / empty bills (defaults to USD). */
-    currency?: string;
-  }>();
+  try {
+    const body = await c.req.json<{
+      telegramChatId: string;
+      groupTitle: string;
+      title: string;
+      createdByUserId?: number;
+      /** ISO date YYYY-MM-DD */
+      billDate?: string;
+      place?: string | null;
+      /** ISO 4217 code for manual / empty bills (defaults to USD). */
+      currency?: string;
+    }>();
 
-  const groupId = groups.upsertGroup(body.telegramChatId, body.groupTitle);
-  const billId = randomUUID();
-  const authUser = c.get("telegramUser");
+    if (!body?.telegramChatId?.trim() || !body?.title?.trim()) {
+      return c.json(
+        {
+          error: "telegramChatId and title are required",
+          code: "invalid_bill_body"
+        },
+        400
+      );
+    }
 
-  sessions.create({
-    id: billId,
-    groupId,
-    title: body.title,
-    status: "draft",
-    createdByUserId: body.createdByUserId ?? authUser?.id,
-    billDate: body.billDate,
-    place: body.place ?? null,
-    currency: body.currency
-  });
+    const groupId = groups.upsertGroup(
+      body.telegramChatId,
+      body.groupTitle?.trim() || "Group"
+    );
+    const billId = randomUUID();
+    const authUser = c.get("telegramUser");
 
-  return c.json({ billId, groupId });
+    sessions.create({
+      id: billId,
+      groupId,
+      title: body.title,
+      status: "draft",
+      createdByUserId: body.createdByUserId ?? authUser?.id,
+      billDate: body.billDate,
+      place: body.place ?? null,
+      currency: body.currency
+    });
+
+    return c.json({ billId, groupId });
+  } catch (err) {
+    console.error("[create-bill]", err);
+    recordPipelineFailure({
+      stage: "create_bill",
+      path: c.req.path,
+      code: "create_bill_failed",
+      message: "Could not create the bill session.",
+      httpStatus: 500
+    });
+    return c.json(
+      {
+        error: "Could not create the bill session. Try again.",
+        code: "create_bill_failed"
+      },
+      500
+    );
+  }
 });
 
 app.post("/api/bills/:billId/receipt", async (c) => {
@@ -396,7 +455,8 @@ app.post("/api/bills/:billId/ocr", async (c) => {
     return c.json(
       {
         error:
-          "Upload a receipt first. OCR only accepts storageKey from this environment (imageUrl is not allowed)."
+          "Upload a receipt first. OCR only accepts storageKey from this environment (imageUrl is not allowed).",
+        code: "missing_storage_key"
       },
       400
     );
@@ -404,15 +464,39 @@ app.post("/api/bills/:billId/ocr", async (c) => {
 
   const receiptRow = db
     .query(
-      `SELECT id FROM receipt_images
+      `SELECT id, mime_type FROM receipt_images
        WHERE bill_session_id = ?1 AND storage_key = ?2
        ORDER BY created_at DESC LIMIT 1`
     )
-    .get(billId, storageKey) as { id: string } | null;
+    .get(billId, storageKey) as { id: string; mime_type: string } | null;
 
   try {
-    const signedUrl = await storage.getSignedUrl(storageKey, 120);
-    const parsed = await ocr.parseReceiptFromImageUrl(signedUrl);
+    // Pull bytes from R2 ourselves and send a data URL. OpenAI frequently fails
+    // to fetch private R2/S3 signed URLs (Timeout while downloading / invalid_image_url).
+    const object = await storage.getObjectBytes(storageKey);
+    const mime = receiptRow?.mime_type || object.contentType;
+    const dataUrl = toOpenAiImageDataUrl(object.bytes, mime);
+    if (!dataUrl.ok) {
+      if (receiptRow) {
+        db.query(
+          `UPDATE receipt_images SET ocr_status = 'failed' WHERE id = ?1`
+        ).run(receiptRow.id);
+      }
+      recordPipelineFailure({
+        stage: "ocr",
+        path: c.req.path,
+        code: "unsupported_ocr_mime",
+        message: dataUrl.message,
+        httpStatus: 422,
+        mime
+      });
+      return c.json(
+        { error: dataUrl.message, code: "unsupported_ocr_mime" },
+        422
+      );
+    }
+
+    const parsed = await ocr.parseReceiptFromImageUrl(dataUrl.dataUrl);
     const validated = validateAndSanitizeParsedReceipt(parsed);
     if (!validated.ok) {
       if (receiptRow) {
@@ -420,7 +504,18 @@ app.post("/api/bills/:billId/ocr", async (c) => {
           `UPDATE receipt_images SET ocr_status = 'failed' WHERE id = ?1`
         ).run(receiptRow.id);
       }
-      return c.json({ error: validated.message }, 422);
+      recordPipelineFailure({
+        stage: "ocr",
+        path: c.req.path,
+        code: "ocr_unreadable",
+        message: validated.message,
+        httpStatus: 422,
+        mime
+      });
+      return c.json(
+        { error: validated.message, code: "ocr_unreadable" },
+        422
+      );
     }
 
     const receipt = validated.receipt;
@@ -468,22 +563,53 @@ app.post("/api/bills/:billId/ocr", async (c) => {
     sessions.updateStatus(billId, "draft");
     return c.json(receipt);
   } catch (err) {
-    if (receiptRow) {
-      db.query(
-        `UPDATE receipt_images SET ocr_status = 'failed' WHERE id = ?1`
-      ).run(receiptRow.id);
+    try {
+      if (receiptRow) {
+        db.query(
+          `UPDATE receipt_images SET ocr_status = 'failed' WHERE id = ?1`
+        ).run(receiptRow.id);
+      }
+    } catch (markErr) {
+      console.warn("[ocr] failed to mark receipt failed", markErr);
     }
-    const classified = classifyOpenAiError(err);
+
+    // Prefer storage classification when GetObject failed; else OpenAI.
+    const errObj = err as {
+      name?: string;
+      message?: string;
+      Code?: string;
+      $metadata?: { httpStatusCode?: number };
+      status?: number;
+    };
+    const isStorageErr = Boolean(
+      errObj?.$metadata ||
+        /S3|NoSuchKey|NotFound|AccessDenied|storage_/i.test(
+          `${errObj?.name ?? ""} ${errObj?.Code ?? ""} ${errObj?.message ?? ""}`
+        )
+    );
+    const classified = isStorageErr
+      ? {
+          ...classifyStorageError(err),
+          openaiStatus: undefined as number | undefined,
+          openaiCode: undefined as string | undefined
+        }
+      : classifyOpenAiError(err);
+
     console.error("[ocr]", classified.code, err);
-    recordPipelineFailure({
-      stage: "ocr",
-      path: c.req.path,
-      code: classified.code,
-      message: classified.message,
-      httpStatus: classified.status,
-      openaiStatus: classified.openaiStatus,
-      openaiCode: classified.openaiCode
-    });
+    try {
+      recordPipelineFailure({
+        stage: "ocr",
+        path: c.req.path,
+        code: classified.code,
+        message: classified.message,
+        httpStatus: classified.status,
+        openaiStatus: classified.openaiStatus,
+        openaiCode: classified.openaiCode,
+        mime: receiptRow?.mime_type
+      });
+    } catch {
+      /* ignore */
+    }
     return c.json(
       {
         error: classified.message,

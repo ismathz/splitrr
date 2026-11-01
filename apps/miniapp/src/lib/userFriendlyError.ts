@@ -129,7 +129,12 @@ function pipelineErrorMessage(
   error: string,
   extras?: Record<string, unknown>,
 ): string | null {
-  const code = String(extras?.code ?? error).trim().toLowerCase();
+  const rawCode = String(extras?.code ?? error).trim().toLowerCase();
+  // onError used to put Error.name in `code` (e.g. "Error"); treat as internal.
+  const code =
+    rawCode === "error" || rawCode === "typeerror" || rawCode === "internal_error"
+      ? "internal_error"
+      : rawCode;
   const detail =
     typeof extras?.message === "string" && extras.message.trim()
       ? extras.message.trim()
@@ -141,10 +146,19 @@ function pipelineErrorMessage(
   if (code === "internal_error") {
     return (
       detail ??
-      "The server hit an internal error while handling the receipt (often storage upload). Try again, or check API R2/OpenAI env."
+      "The server hit an internal error while handling the receipt. Try JPEG/PNG again, or check /api/pipeline/last-failures."
     );
   }
-  if (code.startsWith("storage_") || code.startsWith("openai_") || code === "ocr_failed") {
+  if (
+    code.startsWith("storage_") ||
+    code.startsWith("openai_") ||
+    code === "ocr_failed" ||
+    code === "ocr_unreadable" ||
+    code === "ocr_schema_mismatch" ||
+    code === "unsupported_ocr_mime" ||
+    code === "create_bill_failed" ||
+    code === "missing_storage_key"
+  ) {
     return detail ?? "Receipt upload or scan failed. Try again in a moment.";
   }
   if (code === "invalid_receipt_file" || code === "file_required") {
