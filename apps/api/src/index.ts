@@ -762,6 +762,52 @@ app.get("/api/bills/:billId", (c) => {
     total_price_cents: number;
   }>;
 
+  const mappedItems = items.map((item) => {
+    const assignees = db
+      .query(
+        `SELECT COALESCE(NULLIF(trim(u.first_name), ''), NULLIF(trim(u.username), ''), u.telegram_user_id) AS display_name
+         FROM item_assignments a
+         JOIN users u ON u.id = a.user_id
+         WHERE a.bill_item_id = ?1
+         ORDER BY a.created_at ASC`
+      )
+      .all(item.id) as Array<{ display_name: string | null }>;
+    return {
+      id: item.id,
+      name: item.name,
+      totalPriceCents: item.total_price_cents,
+      assignees: assignees
+        .map((a) => a.display_name?.trim() ?? "")
+        .filter(Boolean),
+    };
+  });
+
+  const storedMembers = db
+    .query(
+      `SELECT member_name
+       FROM bill_session_members
+       WHERE bill_session_id = ?1
+       ORDER BY created_at ASC`
+    )
+    .all(billId) as Array<{ member_name: string }>;
+
+  const members: string[] = [];
+  const seenMembers = new Set<string>();
+  for (const row of storedMembers) {
+    const name = row.member_name.trim();
+    if (!name || seenMembers.has(name)) continue;
+    seenMembers.add(name);
+    members.push(name);
+  }
+  // Back-compat: bills saved before bill_session_members still expose assignees.
+  for (const item of mappedItems) {
+    for (const name of item.assignees) {
+      if (!name || seenMembers.has(name)) continue;
+      seenMembers.add(name);
+      members.push(name);
+    }
+  }
+
   return c.json({
     id: session.id,
     title: session.title,
@@ -770,25 +816,8 @@ app.get("/api/bills/:billId", (c) => {
     billDate: session.bill_date,
     place: session.place,
     settled: session.status === "settled",
-    items: items.map((item) => {
-      const assignees = db
-        .query(
-          `SELECT COALESCE(NULLIF(trim(u.first_name), ''), NULLIF(trim(u.username), ''), u.telegram_user_id) AS display_name
-           FROM item_assignments a
-           JOIN users u ON u.id = a.user_id
-           WHERE a.bill_item_id = ?1
-           ORDER BY a.created_at ASC`
-        )
-        .all(item.id) as Array<{ display_name: string | null }>;
-      return {
-        id: item.id,
-        name: item.name,
-        totalPriceCents: item.total_price_cents,
-        assignees: assignees
-          .map((a) => a.display_name?.trim() ?? "")
-          .filter(Boolean),
-      };
-    }),
+    members,
+    items: mappedItems,
   });
 });
 
@@ -798,6 +827,7 @@ app.patch("/api/bills/:billId", async (c) => {
     title?: string;
     billDate?: string;
     place?: string | null;
+    members?: string[];
     items?: Array<{
       id?: string;
       name: string;
@@ -831,26 +861,36 @@ app.patch("/api/bills/:billId", async (c) => {
     body.place === undefined ? "__KEEP__" : (body.place?.trim() ?? ""),
   );
 
+  const sessionMeta = db
+    .query("SELECT group_id FROM bill_sessions WHERE id = ?1")
+    .get(billId) as { group_id: number } | null;
+  const groupId = sessionMeta?.group_id ?? null;
+
+  const upsertUserByName = db.query(
+    `INSERT INTO users (telegram_user_id, first_name)
+     VALUES (?1, ?2)
+     ON CONFLICT(telegram_user_id) DO UPDATE SET
+       first_name = excluded.first_name`
+  );
+  const getUserByTelegramId = db.query(
+    "SELECT id FROM users WHERE telegram_user_id = ?1"
+  );
+  const upsertGroupMember = db.query(
+    `INSERT OR IGNORE INTO group_members (group_id, user_id)
+     VALUES (?1, ?2)`
+  );
+
+  const resolveNamedUserId = (displayName: string): number | null => {
+    const syntheticTelegramUserId = `name:${displayName.toLowerCase()}`;
+    upsertUserByName.run(syntheticTelegramUserId, displayName);
+    const row = getUserByTelegramId.get(syntheticTelegramUserId) as
+      | { id: number }
+      | null;
+    return row?.id ?? null;
+  };
+
   if (Array.isArray(body.items)) {
     db.query("DELETE FROM bill_items WHERE bill_session_id = ?1").run(billId);
-    const sessionMeta = db
-      .query("SELECT group_id FROM bill_sessions WHERE id = ?1")
-      .get(billId) as { group_id: number } | null;
-    const groupId = sessionMeta?.group_id ?? null;
-    const upsertUserByName = db.query(
-      `INSERT INTO users (telegram_user_id, first_name)
-       VALUES (?1, ?2)
-       ON CONFLICT(telegram_user_id) DO UPDATE SET
-         first_name = excluded.first_name
-       RETURNING id`
-    );
-    const getUserByTelegramId = db.query(
-      "SELECT id FROM users WHERE telegram_user_id = ?1"
-    );
-    const upsertGroupMember = db.query(
-      `INSERT OR IGNORE INTO group_members (group_id, user_id)
-       VALUES (?1, ?2)`
-    );
     const insertAssignment = db.query(
       `INSERT OR IGNORE INTO item_assignments (id, bill_item_id, user_id, weight)
        VALUES (?1, ?2, ?3, 1)`
@@ -869,20 +909,57 @@ app.patch("/api/bills/:billId", async (c) => {
       for (const rawAssignee of item.assignees ?? []) {
         const assigneeName = rawAssignee.trim();
         if (!assigneeName) continue;
-        const syntheticTelegramUserId = `name:${assigneeName.toLowerCase()}`;
-        const inserted = upsertUserByName.get(
-          syntheticTelegramUserId,
-          assigneeName
-        ) as { id: number } | null;
-        const existing = getUserByTelegramId.get(syntheticTelegramUserId) as
-          | { id: number }
-          | null;
-        const userId = inserted?.id ?? existing?.id;
+        const userId = resolveNamedUserId(assigneeName);
         if (!userId) continue;
         if (groupId != null) {
           upsertGroupMember.run(groupId, userId);
         }
         insertAssignment.run(randomUUID(), itemId, userId);
+      }
+    }
+  }
+
+  if (Array.isArray(body.members)) {
+    db.query("DELETE FROM bill_session_members WHERE bill_session_id = ?1").run(
+      billId
+    );
+    const insertMember = db.query(
+      `INSERT OR IGNORE INTO bill_session_members (id, bill_session_id, member_name)
+       VALUES (?1, ?2, ?3)`
+    );
+    const seen = new Set<string>();
+    for (const raw of body.members) {
+      const memberName = raw.trim();
+      if (!memberName) continue;
+      const key = memberName.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      insertMember.run(randomUUID(), billId, memberName);
+      // Keep synthetic users + group roster in sync for settlements/export.
+      const userId = resolveNamedUserId(memberName);
+      if (userId != null && groupId != null) {
+        upsertGroupMember.run(groupId, userId);
+      }
+    }
+  } else if (Array.isArray(body.items)) {
+    // Older clients omit members: derive from assignees so the roster sticks.
+    const derived = new Set<string>();
+    for (const item of body.items) {
+      for (const raw of item.assignees ?? []) {
+        const name = raw.trim();
+        if (name) derived.add(name);
+      }
+    }
+    if (derived.size > 0) {
+      db.query(
+        "DELETE FROM bill_session_members WHERE bill_session_id = ?1"
+      ).run(billId);
+      const insertMember = db.query(
+        `INSERT OR IGNORE INTO bill_session_members (id, bill_session_id, member_name)
+         VALUES (?1, ?2, ?3)`
+      );
+      for (const memberName of derived) {
+        insertMember.run(randomUUID(), billId, memberName);
       }
     }
   }
@@ -951,7 +1028,8 @@ app.post("/api/bills/:billId/announce", async (c) => {
   const openUrl = buildBillAnnounceOpenUrl({
     botUsername: env.TELEGRAM_BOT_USERNAME,
     shortName: env.TELEGRAM_MINI_APP_SHORT_NAME,
-    telegramChatId: bill.telegramChatId
+    telegramChatId: bill.telegramChatId,
+    billId
   });
 
   const text = formatBillAnnounceMessage(bill, {
@@ -1118,6 +1196,15 @@ app.post("/api/settlements/:settlementId/paid", (c) => {
 
 app.get("/api/bills/:billId/payment-status", (c) => {
   const billId = c.req.param("billId");
+  const membersFromSession = db
+    .query(
+      `SELECT member_name, created_at
+       FROM bill_session_members
+       WHERE bill_session_id = ?1
+       ORDER BY created_at ASC`
+    )
+    .all(billId) as Array<{ member_name: string; created_at: string }>;
+
   const membersFromAssignments = db
     .query(
       `SELECT
@@ -1151,6 +1238,12 @@ app.get("/api/bills/:billId/payment-status", (c) => {
 
   const orderedNames: string[] = [];
   const seen = new Set<string>();
+  for (const row of membersFromSession) {
+    const name = row.member_name.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    orderedNames.push(name);
+  }
   for (const row of membersFromAssignments) {
     const name = row.display_name?.trim() ?? "";
     if (!name || seen.has(name)) continue;

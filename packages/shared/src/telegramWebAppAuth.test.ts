@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import {
   buildDirectMiniAppLink,
   encodeStartParamPayload,
+  parseBillIdFromStartParam,
   parseChatIdFromStartParam,
   parseTelegramChatIdFromInitData,
   parseTelegramUserFromInitData,
@@ -206,6 +207,15 @@ describe("parse helpers", () => {
   it("round-trips encodeStartParamPayload cid", () => {
     const encoded = encodeStartParamPayload({ cid: "-1001234567890" });
     expect(parseChatIdFromStartParam(encoded)).toBe("-1001234567890");
+  });
+
+  it("round-trips encodeStartParamPayload bid", () => {
+    const encoded = encodeStartParamPayload({
+      cid: "-1001",
+      bid: "bill-abc"
+    });
+    expect(parseChatIdFromStartParam(encoded)).toBe("-1001");
+    expect(parseBillIdFromStartParam(encoded)).toBe("bill-abc");
   });
 
   it("prefers chat.id over start_param", () => {

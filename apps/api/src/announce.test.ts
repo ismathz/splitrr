@@ -88,14 +88,18 @@ describe("formatBillAnnounceMessage", () => {
 });
 
 describe("buildBillAnnounceOpenUrl", () => {
-  it("builds deep link for the group cid", () => {
+  it("builds deep link for the group cid and bill id", () => {
     const url = buildBillAnnounceOpenUrl({
       botUsername: "SplitrrBot",
       shortName: "app",
-      telegramChatId: "-1001"
+      telegramChatId: "-1001",
+      billId: "bill-1"
     });
     expect(url).toBe(
-      `https://t.me/SplitrrBot/app?startapp=${encodeStartParamPayload({ cid: "-1001" })}`
+      `https://t.me/SplitrrBot/app?startapp=${encodeStartParamPayload({
+        cid: "-1001",
+        bid: "bill-1"
+      })}`
     );
   });
 });

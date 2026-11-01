@@ -154,3 +154,18 @@ export const v5GroupRoster = `
 ALTER TABLE groups ADD COLUMN member_count INTEGER;
 ALTER TABLE users ADD COLUMN photo_url TEXT;
 `;
+
+/** First-class bill participants (independent of item_assignments). */
+export const v6BillSessionMembers = `
+CREATE TABLE IF NOT EXISTS bill_session_members (
+  id TEXT PRIMARY KEY,
+  bill_session_id TEXT NOT NULL,
+  member_name TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (bill_session_id, member_name),
+  FOREIGN KEY (bill_session_id) REFERENCES bill_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_bill_session_members_bill
+  ON bill_session_members(bill_session_id);
+`;
