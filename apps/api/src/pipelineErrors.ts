@@ -58,10 +58,29 @@ export function classifyOpenAiError(err: unknown): {
       openaiCode
     };
   }
-  if (openaiStatus === 429 || /rate_limit/i.test(`${openaiCode} ${raw}`)) {
+  // OpenAI uses HTTP 429 for both true rate limits AND billing/quota exhaustion.
+  // credit_balance_exhausted / insufficient_quota are NOT fixed by waiting a minute.
+  if (
+    /credit_balance_exhausted|insufficient_quota|billing_not_active|billing_hard_limit/i.test(
+      `${openaiCode} ${raw}`
+    )
+  ) {
+    return {
+      code: "openai_quota_exhausted",
+      message:
+        "OpenAI account has no usable credit/quota for OCR. Add billing/credits for the OPENAI_API_KEY on the API host, then retry.",
+      status: 502,
+      openaiStatus,
+      openaiCode
+    };
+  }
+  if (
+    openaiStatus === 429 ||
+    /rate_limit|too_many_requests/i.test(`${openaiCode} ${raw}`)
+  ) {
     return {
       code: "openai_rate_limited",
-      message: "Receipt scanning is temporarily rate-limited. Try again in a minute.",
+      message: "OpenAI is temporarily rate-limiting scans. Wait a minute and try again.",
       status: 429,
       openaiStatus,
       openaiCode

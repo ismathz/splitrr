@@ -51,8 +51,10 @@ const storage = new StorageService({
 const ocr = new OpenAiOcrProvider(env.OPENAI_API_KEY, env.OPENAI_MODEL);
 const OCR_MIN_ITEM_CONFIDENCE = 0.6;
 
-const uploadLimiter = new RateLimiter(20, 20 / 60);
-const ocrLimiter = new RateLimiter(10, 10 / 60);
+// Per-IP token buckets (single VPS process). Keep headroom so retries after
+// OpenAI/network blips are not blocked; OpenAI billing/quota is separate.
+const uploadLimiter = new RateLimiter(60, 60 / 60);
+const ocrLimiter = new RateLimiter(30, 30 / 60);
 
 function clientKey(c: { req: { header: (n: string) => string | undefined } }): string {
   return (
@@ -412,7 +414,13 @@ app.post("/api/bills", async (c) => {
 
 app.post("/api/bills/:billId/receipt", async (c) => {
   if (!uploadLimiter.take(`upload:${clientKey(c)}`)) {
-    return c.json({ error: "rate_limited" }, 429);
+    return c.json(
+      {
+        error: "Too many uploads from this network. Wait a moment and try again.",
+        code: "local_rate_limited"
+      },
+      429
+    );
   }
 
   const billId = c.req.param("billId");
@@ -485,7 +493,13 @@ app.post("/api/bills/:billId/receipt", async (c) => {
 
 app.post("/api/bills/:billId/ocr", async (c) => {
   if (!ocrLimiter.take(`ocr:${clientKey(c)}`)) {
-    return c.json({ error: "rate_limited" }, 429);
+    return c.json(
+      {
+        error: "Too many scan requests from this network. Wait a moment and try again.",
+        code: "local_rate_limited"
+      },
+      429
+    );
   }
 
   const billId = c.req.param("billId");

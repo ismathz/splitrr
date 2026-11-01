@@ -70,8 +70,9 @@ Public URL: https://splitrr.ismath.dev (Cloudflare Tunnel via `cloudflared-split
 - Cloudflare Tunnel (`cloudflared-splitbot`) exposes https://splitrr.ismath.dev
 - SQLite DB path on persistent volume, e.g. `/var/lib/splitbot/splitbot.db`
 - Cloudflare R2 credentials set in env (`S3_*`) and validated on API startup (`HeadBucket`)
-- Required for receipt scan: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4.1-mini`), and full `S3_*` set
+- Required for receipt scan: `OPENAI_API_KEY` **with usable credit/quota**, `OPENAI_MODEL` (default `gpt-4.1-mini`), and full `S3_*` set
 - Dig: `curl -fsS https://splitrr.ismath.dev/api/health` (shows `openai.keyConfigured` / `storage.bucket`) and `curl -fsS https://splitrr.ismath.dev/api/pipeline/last-failures`
+- If dig shows `openaiCode: credit_balance_exhausted` / `openai_quota_exhausted`: top up OpenAI billing for that key (not a Splitbot rate-limit).
 - Production env: `NODE_ENV=production`, `SPLITBOT_DEV_AUTH_BYPASS` unset/false, `TELEGRAM_BOT_TOKEN` set
 - Runtime `.env` on the VPS is operator-managed; deploys must not overwrite it
 
