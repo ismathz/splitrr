@@ -12,32 +12,43 @@ export interface TelegramWebAppUser {
   photo_url?: string;
 }
 
+export type InitDataValidationFailure =
+  | "empty"
+  | "missing_hash"
+  | "bad_hash"
+  | "bad_auth_date"
+  | "expired"
+  | "auth_date_in_future";
+
+export type InitDataValidationResult =
+  | { ok: true }
+  | { ok: false; reason: InitDataValidationFailure };
+
 /**
  * Validates `Telegram.WebApp.initData` per
  * https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
  */
-export function validateWebAppInitData(
+export function validateWebAppInitDataDetailed(
   initData: string,
   botToken: string,
   options?: { maxAgeSec?: number; nowSec?: number }
-): boolean {
-  if (!initData?.trim() || !botToken) return false;
-  let params: URLSearchParams;
-  try {
-    params = new URLSearchParams(initData);
-  } catch {
-    return false;
-  }
-  const hash = params.get("hash");
-  if (!hash) return false;
+): InitDataValidationResult {
+  if (!initData?.trim() || !botToken) return { ok: false, reason: "empty" };
 
-  const pairs: [string, string][] = [];
-  for (const [k, v] of params.entries()) {
+  // Prefer raw pair split so we do not depend on URLSearchParams re-serialization quirks.
+  const pairs = parseInitDataPairs(initData);
+  if (!pairs) return { ok: false, reason: "empty" };
+
+  const hash = pairs.get("hash");
+  if (!hash) return { ok: false, reason: "missing_hash" };
+
+  const checkPairs: [string, string][] = [];
+  for (const [k, v] of pairs.entries()) {
     if (k === "hash" || k === "signature") continue;
-    pairs.push([k, v]);
+    checkPairs.push([k, v]);
   }
-  pairs.sort(([a], [b]) => a.localeCompare(b));
-  const dataCheckString = pairs.map(([k, v]) => `${k}=${v}`).join("\n");
+  checkPairs.sort(([a], [b]) => a.localeCompare(b));
+  const dataCheckString = checkPairs.map(([k, v]) => `${k}=${v}`).join("\n");
 
   // secret_key = HMAC_SHA256(bot_token, "WebAppData")
   const secretKey = createHmac("sha256", botToken)
@@ -47,19 +58,57 @@ export function validateWebAppInitData(
     .update(dataCheckString)
     .digest("hex");
 
-  if (!timingSafeEqualHex(calculated, hash)) return false;
+  if (!timingSafeEqualHex(calculated, hash)) {
+    return { ok: false, reason: "bad_hash" };
+  }
 
   const maxAgeSec = options?.maxAgeSec ?? DEFAULT_INIT_DATA_MAX_AGE_SEC;
   if (maxAgeSec > 0) {
-    const authDateRaw = params.get("auth_date");
+    const authDateRaw = pairs.get("auth_date");
     const authDate = authDateRaw ? Number(authDateRaw) : NaN;
-    if (!Number.isFinite(authDate)) return false;
+    if (!Number.isFinite(authDate)) {
+      return { ok: false, reason: "bad_auth_date" };
+    }
     const nowSec = options?.nowSec ?? Math.floor(Date.now() / 1000);
-    if (nowSec - authDate > maxAgeSec) return false;
-    if (authDate > nowSec + 60) return false;
+    if (nowSec - authDate > maxAgeSec) {
+      return { ok: false, reason: "expired" };
+    }
+    if (authDate > nowSec + 60) {
+      return { ok: false, reason: "auth_date_in_future" };
+    }
   }
 
-  return true;
+  return { ok: true };
+}
+
+export function validateWebAppInitData(
+  initData: string,
+  botToken: string,
+  options?: { maxAgeSec?: number; nowSec?: number }
+): boolean {
+  return validateWebAppInitDataDetailed(initData, botToken, options).ok;
+}
+
+/**
+ * Parse initData query string into decoded key/value pairs (Telegram signing form).
+ * Returns null when the string is empty/unusable.
+ */
+export function parseInitDataPairs(
+  initData: string
+): Map<string, string> | null {
+  const trimmed = initData.trim();
+  if (!trimmed) return null;
+  try {
+    // URLSearchParams decodes values the same way Telegram's reference impl expects.
+    const params = new URLSearchParams(trimmed);
+    const out = new Map<string, string>();
+    for (const [k, v] of params.entries()) {
+      out.set(k, v);
+    }
+    return out.size ? out : null;
+  } catch {
+    return null;
+  }
 }
 
 function timingSafeEqualHex(a: string, b: string): boolean {
@@ -74,13 +123,9 @@ function timingSafeEqualHex(a: string, b: string): boolean {
 export function parseTelegramUserFromInitData(
   initData: string
 ): TelegramWebAppUser | null {
-  let params: URLSearchParams;
-  try {
-    params = new URLSearchParams(initData);
-  } catch {
-    return null;
-  }
-  const userJson = params.get("user");
+  const pairs = parseInitDataPairs(initData);
+  if (!pairs) return null;
+  const userJson = pairs.get("user");
   if (!userJson) return null;
   try {
     const user = JSON.parse(userJson) as TelegramWebAppUser;
@@ -120,13 +165,9 @@ export function buildDirectMiniAppLink(input: {
 }
 
 export function parseTelegramChatIdFromInitData(initData: string): string | null {
-  let params: URLSearchParams;
-  try {
-    params = new URLSearchParams(initData);
-  } catch {
-    return null;
-  }
-  const chatJson = params.get("chat");
+  const pairs = parseInitDataPairs(initData);
+  if (!pairs) return null;
+  const chatJson = pairs.get("chat");
   if (chatJson) {
     try {
       const chat = JSON.parse(chatJson) as { id?: number };
@@ -135,7 +176,7 @@ export function parseTelegramChatIdFromInitData(initData: string): string | null
       /* ignore */
     }
   }
-  const startParam = params.get("start_param");
+  const startParam = pairs.get("start_param");
   if (startParam) {
     const cid = parseChatIdFromStartParam(startParam);
     if (cid) return cid;
