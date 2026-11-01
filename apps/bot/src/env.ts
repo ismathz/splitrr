@@ -19,7 +19,11 @@ const envSchema = z.object({
     .transform((v) => v.trim().replace(/^["']|["']$/g, "")),
   TELEGRAM_WEBHOOK_SECRET: z.string().min(1),
   TELEGRAM_WEBAPP_URL: z.string().url(),
-  SQLITE_PATH: z.string().default("./data/splitbot.db"),
+  /** Prefer an absolute path shared with the API (see docs/deploy.md). */
+  SQLITE_PATH: z
+    .string()
+    .default("./data/splitbot.db")
+    .transform((v) => resolve(v)),
   /**
    * Bot username without `@` for `t.me/<user>/<app>?startapp=` group deep links.
    * Default matches production @SplitrrBot.

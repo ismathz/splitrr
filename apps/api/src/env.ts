@@ -21,7 +21,11 @@ const envSchema = z
   .object({
     NODE_ENV: z.string().default("development"),
     PORT: z.coerce.number().default(3000),
-    SQLITE_PATH: z.string().default("./data/splitbot.db"),
+    /** Prefer an absolute path shared with the bot (see docs/deploy.md). */
+    SQLITE_PATH: z
+      .string()
+      .default("./data/splitbot.db")
+      .transform((v) => resolve(v)),
     /** OpenRouter API key (OpenAI-compatible). Preferred over any legacy OpenAI key. */
     OPENROUTER_API_KEY: z.string().min(1),
     /** OpenAI-compatible base URL (default OpenRouter). */
