@@ -169,3 +169,19 @@ CREATE TABLE IF NOT EXISTS bill_session_members (
 CREATE INDEX IF NOT EXISTS idx_bill_session_members_bill
   ON bill_session_members(bill_session_id);
 `;
+
+/**
+ * Rename open/settled statuses: active→pending, settled→completed.
+ * Promote drafts that already have members (opened but stuck as draft).
+ */
+export const v7BillSessionStatusPendingCompleted = `
+UPDATE bill_sessions SET status = 'pending' WHERE status = 'active';
+UPDATE bill_sessions SET status = 'completed' WHERE status = 'settled';
+UPDATE bill_sessions
+SET status = 'pending'
+WHERE status = 'draft'
+  AND EXISTS (
+    SELECT 1 FROM bill_session_members m
+    WHERE m.bill_session_id = bill_sessions.id
+  );
+`;

@@ -12,7 +12,7 @@ import { encodeStartParamPayload } from "@splitbot/shared";
 const bill: BillAnnounceRow = {
   billId: "bill-1",
   title: "Dinner",
-  status: "active",
+  status: "pending",
   currency: "USD",
   billDate: "2026-10-30",
   place: "Cafe",

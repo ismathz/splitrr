@@ -524,6 +524,12 @@ export function BillEditor(props: BillEditorProps) {
         const parsed = await runReceiptOcr(splitbotApiBase, billId, storageKey);
         if (cancelled) return;
         setCurrencyCode(normalizeCurrencyCode(parsed.currency));
+        const merchant = parsed.merchantName?.trim();
+        if (merchant) {
+          setBillTitle(merchant);
+        } else {
+          setBillTitle((prev) => prev.trim() || title);
+        }
         setItems(
           parsed.items.map((it, i) => ({
             id: `ocr-${billId}-${i}`,
@@ -1214,18 +1220,17 @@ export function BillEditor(props: BillEditorProps) {
 
   const backLabel = props.backLabel ?? (isEditMode ? "Back" : "Back to home");
 
-  const headerTitleNode = isEditMode ? (
+  const headerTitleNode = (
     <input
       value={billTitle}
       onChange={(e) => setBillTitle(e.target.value)}
       className="h-9 w-full rounded-md border bg-background px-3 text-lg font-semibold shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
-      placeholder="Bill title"
+      placeholder={isEditMode ? "Bill title" : "Bill name"}
+      aria-label="Bill name"
     />
-  ) : (
-    <CardTitle className="text-xl">New bill</CardTitle>
   );
 
-  const headerDescriptionNode = isEditMode ? (
+  const headerDescriptionNode = (
     <CardDescription className="flex flex-wrap items-center gap-2">
       <input
         type="date"
@@ -1239,16 +1244,17 @@ export function BillEditor(props: BillEditorProps) {
         placeholder="Place (optional)"
         className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-xs"
       />
-    </CardDescription>
-  ) : (
-    <CardDescription>
-      {groupMembers.length > 0
-        ? groupMembers.length > AUTO_FILL_MAX_GROUP_SIZE
-          ? `Seen ${groupMembers.length}${
-              groupMemberCount != null ? ` of ${groupMemberCount}` : ""
-            } group members — choose who's in this bill.`
-          : "Assign each line item to people in this bill."
-        : "Tap Add members to pick from the group roster, or add someone by name."}
+      {!isEditMode ? (
+        <span className="w-full text-xs text-muted-foreground">
+          {groupMembers.length > 0
+            ? groupMembers.length > AUTO_FILL_MAX_GROUP_SIZE
+              ? `Seen ${groupMembers.length}${
+                  groupMemberCount != null ? ` of ${groupMemberCount}` : ""
+                } group members — choose who's in this bill.`
+              : "Assign each line item to people in this bill."
+            : "Tap Add members to pick from the group roster, or add someone by name."}
+        </span>
+      ) : null}
     </CardDescription>
   );
 
@@ -1724,6 +1730,11 @@ export function BillEditor(props: BillEditorProps) {
                 <AutoAnimateContainer className="divide-y">
                   {chargeRowOrder.map((rowId) => {
                     if (rowId === SERVICE_CHARGE_ROW_ID) {
+                      // Hide "Add Service Charge" when OCR found no service charge.
+                      // Manual (non-OCR) bills can still add one.
+                      if (!isServiceChargeEnabled && isFromReceiptScan) {
+                        return null;
+                      }
                       return (
                         <SortableChargeRow key={rowId} id={rowId}>
                           {isServiceChargeEnabled ? (

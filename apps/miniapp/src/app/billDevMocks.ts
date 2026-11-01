@@ -61,7 +61,7 @@ export const mockBills: BillDetails[] = import.meta.env.DEV
       {
         id: "bill-1001",
         title: "Dinner",
-        status: "active",
+        status: "pending",
         currency: "USD",
         billDate: "2026-04-06",
         place: "North Beach Pizza",
@@ -71,7 +71,7 @@ export const mockBills: BillDetails[] = import.meta.env.DEV
       {
         id: "bill-1002",
         title: "Lunch",
-        status: "settled",
+        status: "completed",
         currency: "MVR",
         billDate: "2026-04-01",
         place: "Market Street Deli",

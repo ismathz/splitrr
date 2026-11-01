@@ -7,6 +7,7 @@ import {
   v4MemberPaymentStatus,
   v5GroupRoster,
   v6BillSessionMembers,
+  v7BillSessionStatusPendingCompleted,
 } from "./schema";
 
 const orderedMigrations: Array<{ name: string; sql: string }> = [
@@ -16,6 +17,10 @@ const orderedMigrations: Array<{ name: string; sql: string }> = [
   { name: "004_member_payment_status.sql", sql: v4MemberPaymentStatus },
   { name: "005_group_roster.sql", sql: v5GroupRoster },
   { name: "006_bill_session_members.sql", sql: v6BillSessionMembers },
+  {
+    name: "007_bill_status_pending_completed.sql",
+    sql: v7BillSessionStatusPendingCompleted,
+  },
 ];
 
 export function applyMigrations(db: Database): void {

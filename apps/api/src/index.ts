@@ -32,6 +32,11 @@ import {
   listRecentPipelineFailures,
   recordPipelineFailure
 } from "./pipelineErrors";
+import {
+  normalizeBillSessionStatus,
+  statusAfterOpenWithMembers,
+  statusFromPaymentChecklist
+} from "./billStatus";
 
 const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
@@ -815,14 +820,15 @@ app.get("/api/bills/:billId", (c) => {
     }
   }
 
+  const status = normalizeBillSessionStatus(session.status);
   return c.json({
     id: session.id,
     title: session.title,
-    status: session.status,
+    status,
     currency: session.currency,
     billDate: session.bill_date,
     place: session.place,
-    settled: session.status === "settled",
+    settled: status === "completed",
     members,
     items: mappedItems,
   });
@@ -848,8 +854,8 @@ app.patch("/api/bills/:billId", async (c) => {
   }
 
   const exists = db
-    .query("SELECT id FROM bill_sessions WHERE id = ?1")
-    .get(billId) as { id: string } | null;
+    .query("SELECT id, status FROM bill_sessions WHERE id = ?1")
+    .get(billId) as { id: string; status: string } | null;
   if (!exists) {
     return c.json({ error: "Bill not found" }, 404);
   }
@@ -926,6 +932,7 @@ app.patch("/api/bills/:billId", async (c) => {
     }
   }
 
+  let memberCountForStatus = 0;
   if (Array.isArray(body.members)) {
     db.query("DELETE FROM bill_session_members WHERE bill_session_id = ?1").run(
       billId
@@ -948,6 +955,7 @@ app.patch("/api/bills/:billId", async (c) => {
         upsertGroupMember.run(groupId, userId);
       }
     }
+    memberCountForStatus = seen.size;
   } else if (Array.isArray(body.items)) {
     // Older clients omit members: derive from assignees so the roster sticks.
     const derived = new Set<string>();
@@ -968,7 +976,29 @@ app.patch("/api/bills/:billId", async (c) => {
       for (const memberName of derived) {
         insertMember.run(randomUUID(), billId, memberName);
       }
+      memberCountForStatus = derived.size;
     }
+  } else {
+    const countRow = db
+      .query(
+        `SELECT COUNT(*) AS count FROM bill_session_members WHERE bill_session_id = ?1`
+      )
+      .get(billId) as { count: number };
+    memberCountForStatus = Number(countRow.count) || 0;
+  }
+
+  // Opening / saving with members promotes draft → pending (not stuck as draft).
+  const nextStatus = statusAfterOpenWithMembers({
+    currentStatus: exists.status,
+    memberCount: memberCountForStatus,
+  });
+  if (nextStatus !== normalizeBillSessionStatus(exists.status)) {
+    sessions.updateStatus(billId, nextStatus);
+  } else if (
+    exists.status === "active" ||
+    exists.status === "settled"
+  ) {
+    sessions.updateStatus(billId, nextStatus);
   }
 
   return c.json({ ok: true });
@@ -1085,6 +1115,18 @@ app.post("/api/bills/:billId/announce", async (c) => {
       })
     );
 
+    // Sharing to the group opens the bill for members → pending.
+    const memberCountRow = db
+      .query(
+        `SELECT COUNT(*) AS count FROM bill_session_members WHERE bill_session_id = ?1`
+      )
+      .get(billId) as { count: number };
+    const nextStatus = statusAfterOpenWithMembers({
+      currentStatus: bill.status,
+      memberCount: Math.max(Number(memberCountRow.count) || 0, 1),
+    });
+    sessions.updateStatus(billId, nextStatus);
+
     return c.json({ ok: true, openUrl });
   } catch (err) {
     console.error("[announce]", err);
@@ -1174,7 +1216,7 @@ app.post("/api/bills/:billId/settlements/compute", async (c) => {
     ).run(randomUUID(), billId, t.payerUserId, t.payeeUserId, t.amountCents);
   }
 
-  sessions.updateStatus(billId, "active");
+  sessions.updateStatus(billId, "pending");
   return c.json({ ok: true, transfers: transfers.length });
 });
 
@@ -1198,7 +1240,7 @@ app.post("/api/settlements/:settlementId/paid", (c) => {
       .get(settlement.bill_session_id) as { count: number };
 
     if (pending.count === 0) {
-      sessions.updateStatus(settlement.bill_session_id, "settled");
+      sessions.updateStatus(settlement.bill_session_id, "completed");
     }
   }
 
@@ -1306,27 +1348,73 @@ app.post("/api/bills/:billId/payment-status", async (c) => {
        updated_at = datetime('now')`
   ).run(randomUUID(), billId, name, body.paid ? 1 : 0);
 
-  const settlementCounts = db
+  // Prefer honor-system checklist for status: all paid → completed, else pending.
+  const membersFromSession = db
+    .query(
+      `SELECT member_name
+       FROM bill_session_members
+       WHERE bill_session_id = ?1
+       ORDER BY created_at ASC`
+    )
+    .all(billId) as Array<{ member_name: string }>;
+  const membersFromAssignments = db
     .query(
       `SELECT
-         COUNT(*) as total_count,
-         SUM(CASE WHEN status != 'paid' THEN 1 ELSE 0 END) as pending_count
-       FROM settlements
+         COALESCE(NULLIF(trim(u.first_name), ''), NULLIF(trim(u.username), ''), u.telegram_user_id) AS display_name
+       FROM bill_items i
+       JOIN item_assignments a ON a.bill_item_id = i.id
+       JOIN users u ON u.id = a.user_id
+       WHERE i.bill_session_id = ?1
+       GROUP BY display_name`
+    )
+    .all(billId) as Array<{ display_name: string | null }>;
+  const paymentRows = db
+    .query(
+      `SELECT member_name, paid
+       FROM bill_member_payment_status
        WHERE bill_session_id = ?1`
     )
-    .get(billId) as { total_count: number; pending_count: number | null };
+    .all(billId) as Array<{ member_name: string; paid: number }>;
 
-  // Keep bill status in sync only when settlement records exist.
-  if (settlementCounts.total_count > 0) {
-    const pendingCount = Number(settlementCounts.pending_count ?? 0);
-    if (pendingCount === 0) {
-      sessions.updateStatus(billId, "settled");
-    } else {
-      sessions.updateStatus(billId, "active");
-    }
+  const orderedNames: string[] = [];
+  const seenNames = new Set<string>();
+  for (const row of membersFromSession) {
+    const n = row.member_name.trim();
+    if (!n || seenNames.has(n)) continue;
+    seenNames.add(n);
+    orderedNames.push(n);
+  }
+  for (const row of membersFromAssignments) {
+    const n = row.display_name?.trim() ?? "";
+    if (!n || seenNames.has(n)) continue;
+    seenNames.add(n);
+    orderedNames.push(n);
+  }
+  for (const row of paymentRows) {
+    const n = row.member_name.trim();
+    if (!n || seenNames.has(n)) continue;
+    seenNames.add(n);
+    orderedNames.push(n);
   }
 
-  return c.json({ ok: true });
+  const paidByName = new Map<string, boolean>();
+  for (const row of paymentRows) {
+    const n = row.member_name.trim();
+    if (!n) continue;
+    paidByName.set(n, row.paid === 1);
+  }
+
+  const current = db
+    .query("SELECT status FROM bill_sessions WHERE id = ?1")
+    .get(billId) as { status: string } | null;
+  const nextStatus = statusFromPaymentChecklist({
+    memberNames: orderedNames,
+    paidByName,
+    currentStatus: current?.status,
+  });
+  sessions.updateStatus(billId, nextStatus);
+
+  return c.json({ ok: true, status: nextStatus });
 });
 
 app.get("/api/groups/:groupId/history", (c) => {

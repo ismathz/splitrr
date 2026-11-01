@@ -38,8 +38,8 @@ const BILL_HISTORY_PREVIEW_LIMIT = 4;
 
 const billStatusBadgeClass: Record<BillDetails["status"], string> = {
   draft: "bg-sky-500/15 text-sky-700",
-  active: "bg-amber-500/15 text-amber-700",
-  settled: "bg-emerald-500/15 text-emerald-700",
+  pending: "bg-amber-500/15 text-amber-700",
+  completed: "bg-emerald-500/15 text-emerald-700",
 };
 
 function BillRow({ bill, onView }: { bill: BillDetails; onView: () => void }) {
