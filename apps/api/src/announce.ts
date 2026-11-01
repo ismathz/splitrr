@@ -19,6 +19,15 @@ export type AnnounceAuthInput = {
   telegramUserId: number | null;
 };
 
+export type AnnouncePerson = {
+  /** Display / bill member name. */
+  displayName: string;
+  /** Telegram @username without leading @ when known. */
+  username?: string | null;
+  /** Numeric Telegram user id when known (for tg:// mentions). */
+  telegramUserId?: number | null;
+};
+
 /**
  * Authorize announce: require a Telegram user (or local bypass), and when
  * initData carries a chat/`cid`, it must match the bill’s group chat id.
@@ -45,23 +54,72 @@ export function authorizeBillAnnounce(
   return { ok: true };
 }
 
+/** Format ISO YYYY-MM-DD for announce copy (stable en-US, calendar day). */
+export function formatAnnounceBillDate(isoDate: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
+  if (!m) return isoDate;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return d.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC"
+  });
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+/**
+ * Prefer @username; else tg:// user mention (HTML); else plain escaped name.
+ */
+export function formatAnnouncePersonMention(person: AnnouncePerson): string {
+  const username = person.username?.trim().replace(/^@/, "") ?? "";
+  if (username) {
+    return `@${username}`;
+  }
+  const name = person.displayName.trim() || "someone";
+  if (
+    person.telegramUserId != null &&
+    Number.isFinite(person.telegramUserId) &&
+    person.telegramUserId > 0
+  ) {
+    return `<a href="tg://user?id=${person.telegramUserId}">${escapeHtml(name)}</a>`;
+  }
+  return escapeHtml(name);
+}
+
 export function formatBillAnnounceMessage(
   bill: BillAnnounceRow,
   extras?: {
     itemCount?: number;
     totalCents?: number;
     openUrl?: string | null;
+    people?: AnnouncePerson[];
   }
 ): string {
+  const people = (extras?.people ?? []).filter((p) => p.displayName.trim());
+  const peopleLine =
+    people.length > 0
+      ? `With: ${people.map(formatAnnouncePersonMention).join(", ")}`
+      : null;
+
   const lines = [
-    `Splitbot · ${bill.title}`,
-    bill.place ? `Place: ${bill.place}` : null,
-    `Date: ${bill.billDate}`,
+    `Splitbot · ${escapeHtml(bill.title)}`,
+    bill.place ? `Place: ${escapeHtml(bill.place)}` : null,
+    `Date: ${formatAnnounceBillDate(bill.billDate)}`,
+    peopleLine,
     typeof extras?.itemCount === "number"
       ? `Items: ${extras.itemCount}`
       : null,
     typeof extras?.totalCents === "number"
-      ? `Total: ${bill.currency} ${(extras.totalCents / 100).toFixed(2)}`
+      ? `Total: ${escapeHtml(bill.currency)} ${(extras.totalCents / 100).toFixed(2)}`
       : null,
     extras?.openUrl ? `Open: ${extras.openUrl}` : null
   ].filter((line): line is string => Boolean(line));

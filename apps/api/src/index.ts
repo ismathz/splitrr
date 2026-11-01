@@ -8,7 +8,8 @@ import {
   GroupRepository,
   GroupRosterRepository
 } from "@splitbot/db";
-import type { ParsedReceipt, ParsedReceiptAdjustment } from "@splitbot/shared";
+import type { ParsedReceipt } from "@splitbot/shared";
+import { inferOcrCharges } from "./ocrCharges";
 import { env } from "./env";
 import { classifyStorageError, StorageService } from "./storage";
 import { OpenRouterOcrProvider, toOcrImageDataUrl } from "./ocr";
@@ -22,6 +23,7 @@ import {
   formatBillAnnounceMessage,
   type BillAnnounceRow
 } from "./announce";
+import { resolveAnnouncePeople } from "./announcePeople";
 import { authorizeRosterChatAccess } from "./roster";
 import { backfillRosterFromBotApi } from "./telegramRosterBackfill";
 import { buildTelegramDiag, type TelegramDiag } from "./telegramDiag";
@@ -77,38 +79,32 @@ function validateAndSanitizeParsedReceipt(parsed: ParsedReceipt):
   | { ok: true; receipt: ParsedReceipt }
   | { ok: false; message: string } {
   const normalizedRawText = parsed.rawText.trim();
-  const normalizedItems = parsed.items
-    .map((item) => ({
-      ...item,
-      name: item.name.trim()
-    }))
-    .filter((item) => item.name.length > 0)
-    .filter((item) => item.confidence >= OCR_MIN_ITEM_CONFIDENCE);
+  const confidenceFiltered: ParsedReceipt = {
+    ...parsed,
+    items: parsed.items
+      .map((item) => ({
+        ...item,
+        name: item.name.trim()
+      }))
+      .filter((item) => item.name.length > 0)
+      .filter((item) => item.confidence >= OCR_MIN_ITEM_CONFIDENCE)
+  };
 
-  const discountAdjustments: ParsedReceiptAdjustment[] = normalizedItems
-    .filter((item) => item.totalPriceCents < 0 || item.unitPriceCents < 0)
-    .map((item) => {
-      const derivedAmountCents =
-        item.totalPriceCents < 0
-          ? item.totalPriceCents
-          : Math.round(item.unitPriceCents * item.qty);
-      return {
-        name: item.name,
-        amountCents:
-          derivedAmountCents < 0
-            ? derivedAmountCents
-            : -Math.abs(derivedAmountCents),
-        confidence: item.confidence
-      };
-    });
+  const inferred = inferOcrCharges(confidenceFiltered);
+  const filteredItems = inferred.items.filter(
+    (item) => item.confidence >= OCR_MIN_ITEM_CONFIDENCE
+  );
+  const discountAdjustments = inferred.discountAdjustments.filter(
+    (d) => d.confidence >= OCR_MIN_ITEM_CONFIDENCE
+  );
 
-  const filteredItems = normalizedItems
-    .filter((item) => Number.isFinite(item.qty) && item.qty > 0)
-    .filter((item) => item.unitPriceCents >= 0)
-    .filter((item) => item.totalPriceCents > 0)
-    .filter((item) => item.confidence >= OCR_MIN_ITEM_CONFIDENCE);
-
-  if (!normalizedRawText && (filteredItems.length > 0 || discountAdjustments.length > 0)) {
+  if (
+    !normalizedRawText &&
+    (filteredItems.length > 0 ||
+      discountAdjustments.length > 0 ||
+      (inferred.serviceChargeCents ?? 0) > 0 ||
+      (inferred.taxCents ?? 0) > 0)
+  ) {
     return {
       ok: false,
       message:
@@ -122,6 +118,11 @@ function validateAndSanitizeParsedReceipt(parsed: ParsedReceipt):
       ...parsed,
       rawText: normalizedRawText,
       items: filteredItems,
+      serviceChargeCents: inferred.serviceChargeCents,
+      taxCents: inferred.taxCents,
+      tipCents: inferred.tipCents,
+      serviceChargeRatePct: inferred.serviceChargeRatePct,
+      taxRatePct: inferred.taxRatePct,
       discountAdjustments
     }
   };
@@ -617,6 +618,12 @@ app.post("/api/bills/:billId/ocr", async (c) => {
       );
     }
 
+    if (receipt.serviceChargeCents) {
+      db.query(
+        `INSERT INTO charges (id, bill_session_id, charge_type, amount_cents) VALUES (?1, ?2, 'service', ?3)`
+      ).run(randomUUID(), billId, receipt.serviceChargeCents);
+    }
+
     if (receipt.taxCents) {
       db.query(
         `INSERT INTO charges (id, bill_session_id, charge_type, amount_cents) VALUES (?1, ?2, 'tax', ?3)`
@@ -1032,10 +1039,13 @@ app.post("/api/bills/:billId/announce", async (c) => {
     billId
   });
 
+  const people = resolveAnnouncePeople(db, billId);
+
   const text = formatBillAnnounceMessage(bill, {
     itemCount: Number(totals.itemCount) || 0,
     totalCents: Number(totals.totalCents) || 0,
-    openUrl
+    openUrl,
+    people
   });
 
   try {
@@ -1045,6 +1055,7 @@ app.post("/api/bills/:billId/announce", async (c) => {
       body: JSON.stringify({
         chat_id: bill.telegramChatId,
         text,
+        parse_mode: "HTML",
         disable_web_page_preview: true
       })
     });
