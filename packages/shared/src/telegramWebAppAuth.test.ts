@@ -6,7 +6,9 @@ import {
   parseChatIdFromStartParam,
   parseTelegramChatIdFromInitData,
   parseTelegramUserFromInitData,
-  validateWebAppInitData
+  validateWebAppInitData,
+  validateWebAppInitDataDetailed,
+  WEBAPP_HMAC_ALGO
 } from "./telegramWebAppAuth";
 
 function signInitData(
@@ -75,6 +77,27 @@ describe("validateWebAppInitData", () => {
         maxAgeSec: 3600
       })
     ).toBe(true);
+  });
+
+  it("exports live HMAC algo marker", () => {
+    expect(WEBAPP_HMAC_ALGO).toBe("WebAppData-as-key-v1");
+  });
+
+  it("reports bad_hash when token does not match signer", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const initData = signInitData(
+      {
+        auth_date: String(now),
+        user: JSON.stringify({ id: 1, first_name: "A" })
+      },
+      token
+    );
+    expect(
+      validateWebAppInitDataDetailed(initData, "999999:WRONG-TOKEN", {
+        nowSec: now,
+        maxAgeSec: 3600
+      })
+    ).toEqual({ ok: false, reason: "bad_hash" });
   });
 
   it("accepts a fresh signed payload", () => {

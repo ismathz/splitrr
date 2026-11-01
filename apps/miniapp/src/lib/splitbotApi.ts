@@ -1,5 +1,8 @@
 import type { ParsedReceipt } from "@splitbot/shared";
-import { parseTelegramChatIdFromInitData } from "@splitbot/shared";
+import {
+  looksLikeWebAppInitData,
+  parseTelegramChatIdFromInitData,
+} from "@splitbot/shared";
 
 import type { TelegramLaunchContext } from "@/lib/telegramLaunchContext";
 import { resolveLaunchTelegramChatId } from "@/lib/telegramLaunchContext";
@@ -44,8 +47,11 @@ export function getTelegramInitData(): string {
       }
     ).Telegram?.WebApp;
     const fromWa = wa?.initData?.trim() ?? "";
-    if (fromWa) return fromWa;
-    return readTgWebAppDataFromUrl();
+    // Never fall back to start_param / unrelated URL junk — that yields bad_hash.
+    if (fromWa && looksLikeWebAppInitData(fromWa)) return fromWa;
+    const fromUrl = readTgWebAppDataFromUrl();
+    if (fromUrl && looksLikeWebAppInitData(fromUrl)) return fromUrl;
+    return "";
   } catch {
     return "";
   }

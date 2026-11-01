@@ -48,7 +48,7 @@ export function toUserFriendlyErrorMessage(
     if (parsed && typeof parsed === "object") {
       const o = parsed as Record<string, unknown>;
       if (typeof o.error === "string") {
-        const authMsg = authErrorMessage(o.error, o.reason);
+        const authMsg = authErrorMessage(o.error, o.reason, o);
         if (authMsg) return authMsg;
       }
       if (typeof o.message === "string" && o.message.trim()) {
@@ -98,17 +98,22 @@ function sanitizeApiMessage(s: string): string | null {
 function authErrorMessage(
   error: string,
   reason?: unknown,
+  extras?: Record<string, unknown>,
 ): string | null {
   const code = error.trim().toLowerCase();
+  const botHint =
+    typeof extras?.tokenBotId === "string" && extras.tokenBotId.trim()
+      ? ` API bot id ${extras.tokenBotId.trim()}.`
+      : "";
   if (code === "missing_init_data") {
-    return "Telegram login data is missing. Close Splitbot and re-open it from /split, then try again.";
+    return `Telegram login data is missing. Close Splitbot and re-open it from /split, then try again.${botHint}`;
   }
   if (code === "invalid_init_data") {
     const why =
       typeof reason === "string" && reason.trim()
         ? ` (${reason.trim()})`
         : "";
-    return `Telegram login expired or invalid${why}. Close Splitbot and re-open it from /split, then try again.`;
+    return `Telegram login expired or invalid${why}. Close Splitbot and re-open from /split. If this keeps happening, the VPS API TELEGRAM_BOT_TOKEN must match @SplitrrBot.${botHint}`;
   }
   return null;
 }
