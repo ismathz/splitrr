@@ -69,4 +69,4 @@ jobs:
 
       - name: Smoke health (optional)
         continue-on-error: true
-        run: curl -fsS https://splitrr.ismath.dev/health
+        run: curl -fsS https://splitrr.ismath.dev/api/health
