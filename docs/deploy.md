@@ -82,7 +82,7 @@ Public URL: https://splitrr.ismath.dev (Cloudflare Tunnel via `cloudflared-split
 - `OPENROUTER_MODEL` is optional: if **unset** on the VPS, the API uses the code default (`google/gemini-3-flash-preview`) after deploy restart — no hand-edit needed when that default changes. If **set** in the VPS `.env`, that value overrides the code default until removed or changed.
 - **Remove** legacy `OPENAI_API_KEY` / `OPENAI_MODEL` from the VPS `.env` — the API no longer reads them (API will fail to boot if only those remain)
 - Dig: `curl -fsS https://splitrr.ismath.dev/api/health` (shows `openrouter.keyConfigured` / `openrouter.model` / `storage.bucket`) and `curl -fsS https://splitrr.ismath.dev/api/pipeline/last-failures`
-- If dig shows `openrouter_quota_exhausted` / HTTP 402 / insufficient credits: top up OpenRouter credits for that key (not a Splitbot rate-limit)
+- If dig shows `openrouter_quota_exhausted` / HTTP 402 / insufficient credits: top up OpenRouter credits for that key (not a Splitrr rate-limit)
 - Production env: `NODE_ENV=production`, `SPLITBOT_DEV_AUTH_BYPASS` unset/false, `TELEGRAM_BOT_TOKEN` set
 - Runtime `.env` on the VPS is operator-managed; deploys must not overwrite it
 
@@ -109,7 +109,7 @@ BotFather checklist:
 2. `/setcommands` (groups + default): `split`, `history`, `help` — remove `newbill`.
 3. Menu Button → same Mini App URL.
 4. Restart bot/API after changing `.env` (deploy does not overwrite `.env`).
-5. **Group roster fill:** Telegram Bot API cannot list all members. Splitbot stores who it can see (admins via `/split` + API-side admin backfill on Mini App open, join/leave, command/message senders, Mini App openers). For a fuller roster, either disable privacy mode (`/setprivacy` → Disable) **or** make the bot a group admin so it sees ordinary messages. No new env vars required for roster.
+5. **Group roster fill:** Telegram Bot API cannot list all members. Splitrr stores who it can see (admins via `/split` + API-side admin backfill on Mini App open, join/leave, command/message senders, Mini App openers). For a fuller roster, either disable privacy mode (`/setprivacy` → Disable) **or** make the bot a group admin so it sees ordinary messages. No new env vars required for roster.
 6. **Shared SQLite:** `SQLITE_PATH` must be the **same absolute path** for `splitbot-api` and `splitbot-bot` (e.g. `/var/lib/splitbot/splitbot.db`). Relative `./data/splitbot.db` under different working directories creates two DBs and the Mini App will not see bot-side roster writes.
 
 ## Mini App build

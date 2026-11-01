@@ -61,7 +61,7 @@ const ocr = new OpenRouterOcrProvider(
   env.OPENROUTER_BASE_URL,
   {
     referer: env.TELEGRAM_WEBAPP_URL,
-    title: "Splitbot"
+    title: "Splitrr"
   }
 );
 const OCR_MIN_ITEM_CONFIDENCE = 0.6;
@@ -1740,7 +1740,7 @@ app.post("/api/reminders/run", async (c) => {
   for (const row of pending) {
     const amount = (row.amount_cents / 100).toFixed(2);
     const text =
-      `Splitbot reminder: you still owe ${row.currency} ${amount} ` +
+      `Splitrr reminder: you still owe ${row.currency} ${amount} ` +
       `for “${row.bill_title}”. Mark paid in the Mini App when settled.`;
 
     const chatId = row.payer_tg;

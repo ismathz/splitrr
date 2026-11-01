@@ -17,7 +17,7 @@ export function buildOpenMiniAppReplyMarkup(input: {
       >;
     }
   | undefined {
-  const text = input.buttonText ?? "Open Splitbot";
+  const text = input.buttonText ?? "Open Splitrr";
 
   if (input.chatType === "private") {
     return {

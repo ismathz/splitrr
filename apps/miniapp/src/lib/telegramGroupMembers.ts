@@ -405,7 +405,7 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
       if (!hasInitData) {
         setStatus("no_context");
         setStatusMessage(
-          "Open Splitbot from Telegram via /split in the group so it can load the roster.",
+          "Open Splitrr from Telegram via /split in the group so it can load the roster.",
         );
       } else if (!billCtx?.telegramChatId) {
         setStatus("no_context");
@@ -464,7 +464,7 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
             if (err instanceof GroupRosterRequestError && (err.status === 401 || err.status === 403)) {
               rosterStatus = "auth_error";
               rosterMessage =
-                "Could not authorize with Telegram. Close and re-open Splitbot from /split.";
+                "Could not authorize with Telegram. Close and re-open Splitrr from /split.";
             } else {
               rosterStatus = "error";
               rosterMessage =

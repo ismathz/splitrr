@@ -113,14 +113,14 @@ function authErrorMessage(
       ? ` API bot id ${extras.tokenBotId.trim()}.`
       : "";
   if (code === "missing_init_data") {
-    return `Telegram login data is missing. Close Splitbot and re-open it from /split, then try again.${botHint}`;
+    return `Telegram login data is missing. Close Splitrr and re-open it from /split, then try again.${botHint}`;
   }
   if (code === "invalid_init_data") {
     const why =
       typeof reason === "string" && reason.trim()
         ? ` (${reason.trim()})`
         : "";
-    return `Telegram login expired or invalid${why}. Close Splitbot and re-open from /split. If this keeps happening, the VPS API TELEGRAM_BOT_TOKEN must match @SplitrrBot.${botHint}`;
+    return `Telegram login expired or invalid${why}. Close Splitrr and re-open from /split. If this keeps happening, the VPS API TELEGRAM_BOT_TOKEN must match @SplitrrBot.${botHint}`;
   }
   return null;
 }

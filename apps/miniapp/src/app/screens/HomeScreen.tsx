@@ -286,7 +286,7 @@ export function HomeScreen() {
               : !splitbotApiBase
                 ? "Connect to the API to load bills for this chat."
                 : !billApiContext
-                  ? "Open Splitbot from a Telegram group to see that chat’s bills."
+                  ? "Open Splitrr from a Telegram group to see that chat’s bills."
                   : "No bills in this chat yet. Scan a receipt or start empty."}
           </CardDescription>
         </Card>

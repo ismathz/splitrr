@@ -472,14 +472,14 @@ export function BillEditor(props: BillEditorProps) {
     if (!splitbotApiBase) {
       setOcrPhase("error");
       setOcrError(
-        "Configure VITE_SPLITBOT_API (Splitbot API URL) to scan receipts from the web app.",
+        "Configure VITE_SPLITBOT_API (Splitrr API URL) to scan receipts from the web app.",
       );
       return;
     }
     if (!billApiContext) {
       setOcrPhase("error");
       setOcrError(
-        "Open Splitbot from a Telegram group (via /split) so this bill can bind to that chat.",
+        "Open Splitrr from a Telegram group (via /split) so this bill can bind to that chat.",
       );
       return;
     }
@@ -490,7 +490,7 @@ export function BillEditor(props: BillEditorProps) {
       const waitId = window.setTimeout(() => {
         setOcrPhase("error");
         setOcrError(
-          "Telegram login data is missing. Close Splitbot and re-open it from /split, then try again.",
+          "Telegram login data is missing. Close Splitrr and re-open it from /split, then try again.",
         );
       }, 3000);
       return () => window.clearTimeout(waitId);
@@ -2271,13 +2271,13 @@ export function BillEditor(props: BillEditorProps) {
           {!isEditMode && !canOpenBillOnServer ? (
             <p className="text-center text-xs text-muted-foreground">
               {!splitbotApiBase
-                ? "Set VITE_SPLITBOT_API to your Splitbot API URL (build-time) to save bills on the server."
-                : "Open Splitbot from a Telegram group (via /split) so this bill can bind to that chat."}
+                ? "Set VITE_SPLITBOT_API to your Splitrr API URL (build-time) to save bills on the server."
+                : "Open Splitrr from a Telegram group (via /split) so this bill can bind to that chat."}
             </p>
           ) : null}
           {isEditMode && !splitbotApiBase ? (
             <p className="text-center text-xs text-muted-foreground">
-              Set VITE_SPLITBOT_API to your Splitbot API URL (build-time) to save edits on the server.
+              Set VITE_SPLITBOT_API to your Splitrr API URL (build-time) to save edits on the server.
             </p>
           ) : null}
         </div>
@@ -2389,9 +2389,9 @@ export function BillEditor(props: BillEditorProps) {
                 <p className="text-sm text-muted-foreground">
                   {groupRosterStatusMessage ??
                     (groupRosterStatus === "auth_error"
-                      ? "Could not authorize with Telegram. Close and re-open Splitbot from /split."
+                      ? "Could not authorize with Telegram. Close and re-open Splitrr from /split."
                       : groupRosterStatus === "no_context"
-                        ? "Open Splitbot from /split in the group so the roster can load."
+                        ? "Open Splitrr from /split in the group so the roster can load."
                         : "No members yet. Run /split in the group. If it stays empty, disable BotFather /setprivacy or make the bot a group admin, then re-run /split. You can still add people by name above.")}
                   {import.meta.env.DEV ? (
                     <>
