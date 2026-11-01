@@ -14,14 +14,14 @@ function signInitData(
 ): string {
   const params = new URLSearchParams(fields);
   const pairs = [...params.entries()]
-    .filter(([k]) => k !== "hash" && k !== "signature")
-    .sort(([a], [b]) => a.localeCompare(b));
-  const dataCheckString = pairs.map(([k, v]) => `${k}=${v}`).join("\n");
+    .filter(([k]) => k !== "hash")
+    .map(([k, v]) => `${k}=${v}`)
+    .sort();
   const secretKey = createHmac("sha256", "WebAppData")
     .update(botToken)
     .digest();
   const hash = createHmac("sha256", secretKey)
-    .update(dataCheckString)
+    .update(pairs.join("\n"))
     .digest("hex");
   params.set("hash", hash);
   return params.toString();

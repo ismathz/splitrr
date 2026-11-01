@@ -11,15 +11,17 @@ import {
   WEBAPP_HMAC_ALGO
 } from "./telegramWebAppAuth";
 
+/** Sign like Telegram / @telegram-apps/init-data-node: exclude only `hash`. */
 function signInitData(
   fields: Record<string, string>,
   botToken: string
 ): string {
   const params = new URLSearchParams(fields);
   const pairs = [...params.entries()]
-    .filter(([k]) => k !== "hash" && k !== "signature")
-    .sort(([a], [b]) => a.localeCompare(b));
-  const dataCheckString = pairs.map(([k, v]) => `${k}=${v}`).join("\n");
+    .filter(([k]) => k !== "hash")
+    .map(([k, v]) => `${k}=${v}`)
+    .sort();
+  const dataCheckString = pairs.join("\n");
   const secretKey = createHmac("sha256", "WebAppData")
     .update(botToken)
     .digest();
@@ -80,7 +82,54 @@ describe("validateWebAppInitData", () => {
   });
 
   it("exports live HMAC algo marker", () => {
-    expect(WEBAPP_HMAC_ALGO).toBe("WebAppData-as-key-v1");
+    expect(WEBAPP_HMAC_ALGO).toBe("WebAppData-as-key-v2-include-signature");
+  });
+
+  it("accepts modern initData that includes Ed25519 signature field", () => {
+    // Real Telegram clients always send `signature` next to `hash`. The HMAC
+    // data-check-string must INCLUDE signature (only hash is excluded).
+    const now = 1_700_000_000;
+    const initData = signInitData(
+      {
+        auth_date: String(now),
+        user: JSON.stringify({ id: 42, first_name: "Ada" }),
+        signature:
+          "zL-ucjNyREiHDE8aihFwpfR9aggP2xiAo3NSpfe-p7IbCisNlDKlo7Kb6G4D0Ao2mBrSgEk4maLSdv6MLIlADQ",
+        chat_type: "group",
+        chat_instance: "8134722200314281151"
+      },
+      token
+    );
+    expect(initData).toContain("signature=");
+    expect(
+      validateWebAppInitData(initData, token, { nowSec: now, maxAgeSec: 3600 })
+    ).toBe(true);
+  });
+
+  it("rejects when signature was wrongly omitted from the signed check string", () => {
+    // Simulates the pre-fix bug: hash computed without signature, but payload has signature.
+    const now = 1_700_000_000;
+    const fields = {
+      auth_date: String(now),
+      user: JSON.stringify({ id: 42, first_name: "Ada" }),
+      signature: "dummy-ed25519-signature"
+    };
+    const params = new URLSearchParams(fields);
+    const wrongPairs = [...params.entries()]
+      .filter(([k]) => k !== "hash" && k !== "signature")
+      .map(([k, v]) => `${k}=${v}`)
+      .sort();
+    const secretKey = createHmac("sha256", "WebAppData").update(token).digest();
+    const wrongHash = createHmac("sha256", secretKey)
+      .update(wrongPairs.join("\n"))
+      .digest("hex");
+    params.set("hash", wrongHash);
+    expect(
+      validateWebAppInitDataDetailed(params.toString(), token, {
+        nowSec: now,
+        maxAgeSec: 3600
+      })
+    ).toEqual({ ok: false, reason: "bad_hash" });
   });
 
   it("reports bad_hash when token does not match signer", () => {
