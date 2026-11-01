@@ -29,13 +29,19 @@ export class StorageService {
   constructor(config: StorageConfig) {
     this.bucket = config.bucket;
     this.keyPrefix = config.keyPrefix.replace(/^\/+|\/+$/g, "");
+    // R2 (and some other S3-compat stores) reject AWS SDK v3.729+ default
+    // flexible checksums on PutObject → InternalError. Cloudflare docs:
+    // requestChecksumCalculation / responseChecksumValidation = WHEN_REQUIRED.
     this.client = new S3Client({
       region: config.region,
       endpoint: config.endpoint,
+      forcePathStyle: true,
       credentials: {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey
-      }
+      },
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED"
     });
   }
 
@@ -91,4 +97,62 @@ export class StorageService {
     }
     return `${this.keyPrefix}/${key.replace(/^\/+/, "")}`;
   }
+}
+
+/** Classify S3/R2 errors for API responses (never include credentials). */
+export function classifyStorageError(err: unknown): {
+  code: string;
+  message: string;
+  status: number;
+} {
+  const anyErr = err as {
+    name?: string;
+    Code?: string;
+    code?: string;
+    message?: string;
+    $metadata?: { httpStatusCode?: number };
+  };
+  const code =
+    anyErr?.Code ||
+    anyErr?.code ||
+    anyErr?.name ||
+    "storage_error";
+  const http = anyErr?.$metadata?.httpStatusCode;
+  const raw = typeof anyErr?.message === "string" ? anyErr.message : "";
+
+  if (/checksum|x-amz-checksum|NotImplemented/i.test(`${code} ${raw}`)) {
+    return {
+      code: "storage_checksum_rejected",
+      message:
+        "Receipt storage rejected the upload (S3 checksum). Check R2/S3 client config.",
+      status: 502
+    };
+  }
+  if (/NoSuchBucket|NotFound|404/i.test(`${code} ${raw}`) || http === 404) {
+    return {
+      code: "storage_bucket_missing",
+      message: "Receipt storage bucket was not found. Check S3_BUCKET on the API host.",
+      status: 502
+    };
+  }
+  if (/InvalidAccessKeyId|SignatureDoesNotMatch|AccessDenied|403/i.test(`${code} ${raw}`) || http === 403) {
+    return {
+      code: "storage_auth_failed",
+      message:
+        "Receipt storage credentials were rejected. Check S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY.",
+      status: 502
+    };
+  }
+  if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|networking/i.test(`${code} ${raw}`)) {
+    return {
+      code: "storage_unreachable",
+      message: "Could not reach receipt storage (S3_ENDPOINT). Check network / endpoint URL.",
+      status: 502
+    };
+  }
+  return {
+    code: "storage_error",
+    message: "Could not store the receipt image. Try again in a moment.",
+    status: 502
+  };
 }

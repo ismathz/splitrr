@@ -50,11 +50,18 @@ export function toUserFriendlyErrorMessage(
       if (typeof o.error === "string") {
         const authMsg = authErrorMessage(o.error, o.reason, o);
         if (authMsg) return authMsg;
+        const pipelineMsg = pipelineErrorMessage(o.error, o);
+        if (pipelineMsg) return pipelineMsg;
       }
       if (typeof o.message === "string" && o.message.trim()) {
-        return sanitizeApiMessage(o.message.trim()) ?? fallback;
+        const msg = o.message.trim();
+        if (msg.toLowerCase() !== "internal_error") {
+          return sanitizeApiMessage(msg) ?? fallback;
+        }
       }
       if (typeof o.error === "string" && o.error.trim()) {
+        const pipelineMsg = pipelineErrorMessage(o.error, o);
+        if (pipelineMsg) return pipelineMsg;
         return sanitizeApiMessage(o.error.trim()) ?? fallback;
       }
     }
@@ -114,6 +121,37 @@ function authErrorMessage(
         ? ` (${reason.trim()})`
         : "";
     return `Telegram login expired or invalid${why}. Close Splitbot and re-open from /split. If this keeps happening, the VPS API TELEGRAM_BOT_TOKEN must match @SplitrrBot.${botHint}`;
+  }
+  return null;
+}
+
+function pipelineErrorMessage(
+  error: string,
+  extras?: Record<string, unknown>,
+): string | null {
+  const code = String(extras?.code ?? error).trim().toLowerCase();
+  const detail =
+    typeof extras?.message === "string" && extras.message.trim()
+      ? extras.message.trim()
+      : typeof extras?.error === "string" &&
+          extras.error.trim().toLowerCase() !== "internal_error"
+        ? extras.error.trim()
+        : null;
+
+  if (code === "internal_error") {
+    return (
+      detail ??
+      "The server hit an internal error while handling the receipt (often storage upload). Try again, or check API R2/OpenAI env."
+    );
+  }
+  if (code.startsWith("storage_") || code.startsWith("openai_") || code === "ocr_failed") {
+    return detail ?? "Receipt upload or scan failed. Try again in a moment.";
+  }
+  if (code === "invalid_receipt_file" || code === "file_required") {
+    return detail ?? "That image couldn’t be uploaded. Try a JPEG or PNG under 10 MB.";
+  }
+  if (code === "rate_limited") {
+    return "Too many scans just now. Wait a moment and try again.";
   }
   return null;
 }

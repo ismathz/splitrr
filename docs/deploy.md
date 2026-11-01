@@ -69,7 +69,9 @@ Public URL: https://splitrr.ismath.dev (Cloudflare Tunnel via `cloudflared-split
 - `splitbot-static` serves the Mini App build on port `8787`
 - Cloudflare Tunnel (`cloudflared-splitbot`) exposes https://splitrr.ismath.dev
 - SQLite DB path on persistent volume, e.g. `/var/lib/splitbot/splitbot.db`
-- Cloudflare R2 credentials set in env (`S3_*`) and validated on API startup
+- Cloudflare R2 credentials set in env (`S3_*`) and validated on API startup (`HeadBucket`)
+- Required for receipt scan: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4.1-mini`), and full `S3_*` set
+- Dig: `curl -fsS https://splitrr.ismath.dev/api/health` (shows `openai.keyConfigured` / `storage.bucket`) and `curl -fsS https://splitrr.ismath.dev/api/pipeline/last-failures`
 - Production env: `NODE_ENV=production`, `SPLITBOT_DEV_AUTH_BYPASS` unset/false, `TELEGRAM_BOT_TOKEN` set
 - Runtime `.env` on the VPS is operator-managed; deploys must not overwrite it
 
@@ -133,6 +135,11 @@ VITE_BOT_MINIAPP_API=https://bot.example.com \
 BACKUP_ARCHIVE=/path/to/backup.sqlite3.zst ./scripts/restore-drill.sh
 ```
 Run monthly in staging.
+
+## R2 / receipt upload notes
+- API S3 client sets `requestChecksumCalculation` / `responseChecksumValidation` to `WHEN_REQUIRED` (AWS SDK v3.729+ default checksums break R2 `PutObject`).
+- Also uses `forcePathStyle: true` for R2-compatible endpoints.
+- If Mini App shows `internal_error` / storage errors while scanning: confirm `S3_ENDPOINT`, `S3_BUCKET`, keys, and that OpenAI can fetch R2 signed GET URLs.
 
 ## R2 Lifecycle Recommendations
 - Keep receipt bucket private; serve files with signed URLs only

@@ -31,4 +31,29 @@ describe("toUserFriendlyErrorMessage auth", () => {
     expect(msg.toLowerCase()).toContain("missing");
     expect(msg.toLowerCase()).toContain("/split");
   });
+
+  it("maps internal_error to actionable copy", () => {
+    const msg = toUserFriendlyErrorMessage(
+      new Error(
+        JSON.stringify({
+          error: "internal_error",
+          code: "internal_error",
+          message: "Storage or OCR backend failed.",
+        }),
+      ),
+    );
+    expect(msg.toLowerCase()).toContain("storage");
+  });
+
+  it("maps storage_checksum_rejected", () => {
+    const msg = toUserFriendlyErrorMessage(
+      new Error(
+        JSON.stringify({
+          error: "Receipt storage rejected the upload (S3 checksum).",
+          code: "storage_checksum_rejected",
+        }),
+      ),
+    );
+    expect(msg.toLowerCase()).toContain("checksum");
+  });
 });
