@@ -152,6 +152,7 @@ function pipelineErrorMessage(
   if (
     code.startsWith("storage_") ||
     code.startsWith("openai_") ||
+    code.startsWith("openrouter_") ||
     code === "ocr_failed" ||
     code === "ocr_unreadable" ||
     code === "ocr_schema_mismatch" ||
@@ -168,10 +169,13 @@ function pipelineErrorMessage(
   if (code === "rate_limited" || code === "local_rate_limited") {
     return detail ?? "Too many scans just now. Wait a moment and try again.";
   }
-  if (code === "openai_quota_exhausted") {
+  if (
+    code === "openrouter_quota_exhausted" ||
+    code === "openai_quota_exhausted"
+  ) {
     return (
       detail ??
-      "OpenAI has no credit/quota for OCR. Add billing on the API OPENAI_API_KEY, then retry."
+      "OpenRouter has no credit/quota for OCR. Add credits for OPENROUTER_API_KEY, then retry."
     );
   }
   return null;

@@ -22,8 +22,16 @@ const envSchema = z
     NODE_ENV: z.string().default("development"),
     PORT: z.coerce.number().default(3000),
     SQLITE_PATH: z.string().default("./data/splitbot.db"),
-    OPENAI_API_KEY: z.string().min(1),
-    OPENAI_MODEL: z.string().default("gpt-4.1-mini"),
+    /** OpenRouter API key (OpenAI-compatible). Preferred over any legacy OpenAI key. */
+    OPENROUTER_API_KEY: z.string().min(1),
+    /** OpenAI-compatible base URL (default OpenRouter). */
+    OPENROUTER_BASE_URL: z
+      .string()
+      .url()
+      .default("https://openrouter.ai/api/v1"),
+    /** Vision-capable model id on OpenRouter (provider/model). */
+    OPENROUTER_MODEL: z.string().default("openai/gpt-4o-mini"),
+
     S3_BUCKET: z.string().min(1),
     S3_ENDPOINT: z.string().url(),
     S3_REGION: z.string().default("auto"),

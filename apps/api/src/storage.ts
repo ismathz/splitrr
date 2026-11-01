@@ -78,7 +78,7 @@ export class StorageService {
     );
   }
 
-  /** Fetch object bytes from R2/S3 (for OCR base64 — OpenAI often cannot fetch R2 signed URLs). */
+  /** Fetch object bytes from R2/S3 (for OCR base64 — OpenRouter often cannot fetch R2 signed URLs). */
   async getObjectBytes(key: string): Promise<{
     bytes: Uint8Array;
     contentType: string;
