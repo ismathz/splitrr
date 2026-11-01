@@ -1,7 +1,7 @@
 export type BillSessionStatus =
   | "draft"
-  | "active"
-  | "settled";
+  | "pending"
+  | "completed";
 
 export interface BillSessionStatusMeta {
   label: string;
@@ -20,16 +20,16 @@ export const BILL_SESSION_STATUS_META: Record<
     visibleToParticipants: false,
     editableFreely: true,
   },
-  active: {
-    label: "Open / Active",
+  pending: {
+    label: "Pending",
     description:
-      "Bill is shared and waiting for payments until all participants have paid their share.",
+      "Bill is open with members and waiting until everyone has marked their share paid.",
     visibleToParticipants: true,
     editableFreely: false,
   },
-  settled: {
-    label: "Settled (Fully Paid)",
-    description: "Everyone has paid their share and the bill is complete.",
+  completed: {
+    label: "Completed",
+    description: "Everyone has marked their share paid and the bill is complete.",
     visibleToParticipants: true,
     editableFreely: false,
   },

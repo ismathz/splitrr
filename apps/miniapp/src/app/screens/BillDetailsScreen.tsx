@@ -31,8 +31,8 @@ import { BillEditor } from "./BillEditor";
 
 const billStatusBadgeClass: Record<BillDetails["status"], string> = {
   draft: "bg-sky-500/15 text-sky-700",
-  active: "bg-amber-500/15 text-amber-700",
-  settled: "bg-emerald-500/15 text-emerald-700",
+  pending: "bg-amber-500/15 text-amber-700",
+  completed: "bg-emerald-500/15 text-emerald-700",
 };
 import { getItemDisplayEmoji } from "@/lib/itemEmoji";
 import { ArrowLeftIcon, EllipsisVertical } from "@hugeicons/core-free-icons";
@@ -47,6 +47,10 @@ import {
   resolveBillContextForApi,
   updateBillPaymentStatus,
 } from "@/lib/splitbotApi";
+import {
+  useTelegramGroupMembers,
+  type TelegramGroupMember,
+} from "@/lib/telegramGroupMembers";
 import { useTelegramLaunchContext } from "@/lib/telegramLaunchContext";
 import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
 
@@ -68,15 +72,66 @@ function getAvatarColors(name: string) {
   return { backgroundColor, foregroundColor };
 }
 
-function MemberAvatar({ name }: { name: string }) {
+function rgb24IntToCss(n: number) {
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return { r, g, b, css: `rgb(${r} ${g} ${b})` };
+}
+
+function pickReadableForegroundFromRgb(r: number, g: number, b: number) {
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return lum > 0.55 ? "#111827" : "#ffffff";
+}
+
+function MemberAvatar({
+  name,
+  avatarBgColors,
+  photoUrl,
+}: {
+  name: string;
+  avatarBgColors?: number[];
+  photoUrl?: string;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  if (photoUrl && !imgFailed) {
+    return (
+      <img
+        src={photoUrl}
+        alt=""
+        className="h-6 w-6 shrink-0 rounded-full object-cover"
+        onError={() => setImgFailed(true)}
+      />
+    );
+  }
+
   const initials = getInitials(name);
-  const { backgroundColor, foregroundColor } = getAvatarColors(name);
+  const bg = avatarBgColors && avatarBgColors.length ? avatarBgColors : null;
+
+  let backgroundColor: string | undefined;
+  let backgroundImage: string | undefined;
+  let foregroundColor: string;
+
+  if (bg && bg.length) {
+    const c0 = rgb24IntToCss(bg[0]);
+    const c1 = bg.length >= 2 ? rgb24IntToCss(bg[1]) : null;
+    backgroundColor = c0.css;
+    foregroundColor = pickReadableForegroundFromRgb(c0.r, c0.g, c0.b);
+    if (c1) {
+      backgroundImage = `linear-gradient(135deg, ${c0.css}, ${c1.css})`;
+    }
+  } else {
+    const v = getAvatarColors(name);
+    backgroundColor = v.backgroundColor;
+    foregroundColor = v.foregroundColor;
+  }
 
   return (
     <span
       aria-hidden="true"
       className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold"
-      style={{ backgroundColor, color: foregroundColor }}
+      style={{ backgroundColor, backgroundImage, color: foregroundColor }}
     >
       {initials}
     </span>
@@ -114,7 +169,15 @@ function formatBillMoney(currencyCode: string, cents: number) {
   return `${currencyCode} ${(cents / 100).toFixed(2)}`;
 }
 
-function AssigneesRow({ assignees }: { assignees: string[] }) {
+function AssigneesRow({
+  assignees,
+  resolveMember,
+  resolvePhotoUrl,
+}: {
+  assignees: string[];
+  resolveMember?: (name: string) => TelegramGroupMember | undefined;
+  resolvePhotoUrl?: (mem: TelegramGroupMember | undefined) => string | undefined;
+}) {
   if (assignees.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -125,15 +188,22 @@ function AssigneesRow({ assignees }: { assignees: string[] }) {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {assignees.map((member) => (
-        <Toggle
-          key={member}
-          className="rounded-full text-sm p-1 pr-2.5 gap-1.5"
-        >
-          <MemberAvatar name={member} />
-          <span>{member}</span>
-        </Toggle>
-      ))}
+      {assignees.map((member) => {
+        const mem = resolveMember?.(member);
+        return (
+          <Toggle
+            key={member}
+            className="rounded-full text-sm p-1 pr-2.5 gap-1.5"
+          >
+            <MemberAvatar
+              name={member}
+              avatarBgColors={mem?.avatarBgColors}
+              photoUrl={resolvePhotoUrl?.(mem)}
+            />
+            <span>{member}</span>
+          </Toggle>
+        );
+      })}
     </div>
   );
 }
@@ -146,6 +216,29 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
   const [reloadToken, setReloadToken] = useState(0);
   const splitbotApiBase = useMemo(() => getSplitbotApiBase(), []);
   const launchCtx = useTelegramLaunchContext();
+  const { members: groupMembers } = useTelegramGroupMembers();
+  const miniappApiBase = useMemo(
+    () => import.meta.env.VITE_BOT_MINIAPP_API?.replace(/\/$/, "") ?? "",
+    [],
+  );
+  const memberByName = useMemo(() => {
+    const map = new Map<string, TelegramGroupMember>();
+    for (const m of groupMembers) {
+      map.set(m.name, m);
+      map.set(m.name.toLowerCase(), m);
+    }
+    return map;
+  }, [groupMembers]);
+  const resolveMember = (name: string) =>
+    memberByName.get(name) ?? memberByName.get(name.toLowerCase());
+  const resolveMemberPhotoUrl = (mem: TelegramGroupMember | undefined) => {
+    if (!mem) return undefined;
+    if (mem.photoUrl) return mem.photoUrl;
+    if (mem.avatarProxyPath && miniappApiBase) {
+      return `${miniappApiBase}${mem.avatarProxyPath}`;
+    }
+    return undefined;
+  };
   const billApiContext = useMemo(
     () => resolveBillContextForApi(launchCtx),
     [
@@ -271,12 +364,28 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
     string | null
   >(null);
 
+  const syncBillStatusFromPaid = (nextPaid: Set<string>) => {
+    const allPaid =
+      membersOrdered.length > 0 &&
+      membersOrdered.every((m) => nextPaid.has(m));
+    setServerBill((billPrev) =>
+      billPrev
+        ? {
+            ...billPrev,
+            status: allPaid ? "completed" : "pending",
+            settled: allPaid,
+          }
+        : billPrev,
+    );
+  };
+
   const togglePaid = async (name: string, next: boolean) => {
     setPaymentStatusError(null);
     setPaidMemberNames((prev) => {
       const nextSet = new Set(prev);
       if (next) nextSet.add(name);
       else nextSet.delete(name);
+      syncBillStatusFromPaid(nextSet);
       return nextSet;
     });
 
@@ -299,6 +408,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
         const nextSet = new Set(prev);
         if (next) nextSet.delete(name);
         else nextSet.add(name);
+        syncBillStatusFromPaid(nextSet);
         return nextSet;
       });
       setPaymentStatusError(message);
@@ -311,8 +421,6 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
       });
     }
   };
-
-  const paidCount = membersOrdered.filter((m) => paidMemberNames.has(m)).length;
 
   useEffect(() => {
     let cancelled = false;
@@ -381,6 +489,11 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
     setIsAnnouncing(true);
     try {
       await announceBillToGroup(splitbotApiBase, billId);
+      setServerBill((prev) =>
+        prev && prev.status === "draft"
+          ? { ...prev, status: "pending", settled: false }
+          : prev,
+      );
       setAnnounceToastMessage("Shared to the group.");
     } catch (e) {
       const message = toUserFriendlyErrorMessage(e);
@@ -594,7 +707,11 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
               </div>
 
               <div className="w-full">
-                <AssigneesRow assignees={item.assignees} />
+                <AssigneesRow
+                  assignees={item.assignees}
+                  resolveMember={resolveMember}
+                  resolvePhotoUrl={resolveMemberPhotoUrl}
+                />
               </div>
             </Card>
           ))}
@@ -637,11 +754,11 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
         <div className="space-y-2">
           <div>
             <CardTitle className="text-xl">Split breakdown</CardTitle>
-            <CardDescription>
-              {membersOrdered.length > 0
-                ? `Manual checklist — mark who settled their share (${paidCount} of ${membersOrdered.length}). Not a payment processor.`
-                : "Assign people to items to start tracking payments."}
-            </CardDescription>
+            {membersOrdered.length === 0 ? (
+              <CardDescription>
+                Assign people to items to start tracking payments.
+              </CardDescription>
+            ) : null}
           </div>
           <Card className="rounded-xl border p-0 overflow-hidden">
             {membersOrdered.length > 0 ? (
@@ -650,6 +767,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                   const cents = balances.get(name) ?? 0;
                   const paid = paidMemberNames.has(name);
                   const id = `paid-${bill.id}-${name}`;
+                  const mem = resolveMember(name);
                   return (
                     <li key={name}>
                       <label
@@ -671,7 +789,11 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                                 "border-green-600 bg-green-600 text-success-foreground",
                             )}
                           />
-                          <MemberAvatar name={name} />
+                          <MemberAvatar
+                            name={name}
+                            avatarBgColors={mem?.avatarBgColors}
+                            photoUrl={resolveMemberPhotoUrl(mem)}
+                          />
                           <span
                             className={`truncate font-medium ${paid ? "text-muted-foreground line-through" : ""}`}
                           >

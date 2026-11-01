@@ -23,7 +23,7 @@ export function formatBillDateLabel(isoDate: string): string {
 export type BillDetails = {
   id: string;
   title: string;
-  status: "draft" | "active" | "settled";
+  status: "draft" | "pending" | "completed";
   /** ISO 4217 code. */
   currency: string;
   /** ISO date YYYY-MM-DD — when the meal / bill happened. */

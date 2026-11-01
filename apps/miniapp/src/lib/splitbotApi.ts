@@ -216,7 +216,7 @@ export async function runReceiptOcr(
 export type ApiBillDetails = {
   id: string;
   title: string;
-  status: "draft" | "active" | "settled";
+  status: "draft" | "pending" | "completed";
   currency: string;
   billDate: string;
   place: string | null;
@@ -234,7 +234,7 @@ export type ApiBillDetails = {
 export type ApiBillHistoryEntry = {
   id: string;
   title: string;
-  status: "draft" | "active" | "settled";
+  status: "draft" | "pending" | "completed";
   currency: string;
   billDate: string;
   place: string | null;
