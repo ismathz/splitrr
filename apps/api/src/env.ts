@@ -30,7 +30,7 @@ const envSchema = z
       .url()
       .default("https://openrouter.ai/api/v1"),
     /** Vision-capable model id on OpenRouter (provider/model). */
-    OPENROUTER_MODEL: z.string().default("openai/gpt-4o-mini"),
+    OPENROUTER_MODEL: z.string().default("google/gemini-3-flash-preview"),
 
     S3_BUCKET: z.string().min(1),
     S3_ENDPOINT: z.string().url(),

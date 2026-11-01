@@ -76,9 +76,10 @@ Public URL: https://splitrr.ismath.dev (Cloudflare Tunnel via `cloudflared-split
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` | **Yes** | `sk-or-v1-…` from https://openrouter.ai/keys |
 | `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` |
-| `OPENROUTER_MODEL` | No | `openai/gpt-4o-mini` (any vision-capable OpenRouter model) |
+| `OPENROUTER_MODEL` | No | `google/gemini-3-flash-preview` (any vision-capable OpenRouter model) |
 | `S3_*` | Yes | unchanged R2 credentials |
 
+- `OPENROUTER_MODEL` is optional: if **unset** on the VPS, the API uses the code default (`google/gemini-3-flash-preview`) after deploy restart — no hand-edit needed when that default changes. If **set** in the VPS `.env`, that value overrides the code default until removed or changed.
 - **Remove** legacy `OPENAI_API_KEY` / `OPENAI_MODEL` from the VPS `.env` — the API no longer reads them (API will fail to boot if only those remain)
 - Dig: `curl -fsS https://splitrr.ismath.dev/api/health` (shows `openrouter.keyConfigured` / `openrouter.model` / `storage.bucket`) and `curl -fsS https://splitrr.ismath.dev/api/pipeline/last-failures`
 - If dig shows `openrouter_quota_exhausted` / HTTP 402 / insufficient credits: top up OpenRouter credits for that key (not a Splitbot rate-limit)

@@ -98,7 +98,7 @@ export function classifyOpenRouterError(err: unknown): {
     return {
       code: "openrouter_model_invalid",
       message:
-        "OpenRouter model is invalid or unavailable. Check OPENROUTER_MODEL on the API host (e.g. openai/gpt-4o-mini).",
+        "OpenRouter model is invalid or unavailable. Check OPENROUTER_MODEL on the API host (e.g. google/gemini-3-flash-preview).",
       status: 502,
       openrouterStatus,
       openrouterCode
