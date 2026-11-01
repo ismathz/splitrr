@@ -1,6 +1,8 @@
 import type { ParsedReceipt } from "@splitbot/shared";
+import { parseTelegramChatIdFromInitData } from "@splitbot/shared";
 
 import type { TelegramLaunchContext } from "@/lib/telegramLaunchContext";
+import { resolveLaunchTelegramChatId } from "@/lib/telegramLaunchContext";
 import { parseTelegramChatIdFromStartParam } from "@/lib/telegramGroupMembers";
 
 /** Base URL for `apps/api` (bills + OCR). Set `VITE_SPLITBOT_API`; DEV defaults to localhost:3000. */
@@ -50,6 +52,17 @@ export function resolveBillContextForApi(
       telegramChatId: String(ctx.chat.id),
       groupTitle: ctx.chat.title?.trim() || "Group",
     };
+  }
+  // Prefer shared parser over start_param-only (handles initData chat + cid).
+  const fromLaunch = resolveLaunchTelegramChatId(ctx);
+  if (fromLaunch) {
+    return { telegramChatId: fromLaunch, groupTitle: "Group" };
+  }
+  if (ctx.initData) {
+    const fromInit = parseTelegramChatIdFromInitData(ctx.initData);
+    if (fromInit) {
+      return { telegramChatId: fromInit, groupTitle: "Group" };
+    }
   }
   const cid = parseTelegramChatIdFromStartParam(ctx.startParam);
   if (cid) {
@@ -188,18 +201,33 @@ export type ApiGroupRoster = {
   memberCount: number | null;
   seenCount: number;
   unseenCount: number | null;
+  backfillError?: string | null;
 };
+
+export class GroupRosterRequestError extends Error {
+  status: number;
+  body: string;
+
+  constructor(status: number, body: string) {
+    super(body || `get group roster failed: ${status}`);
+    this.name = "GroupRosterRequestError";
+    this.status = status;
+    this.body = body;
+  }
+}
 
 /** Stored bot-visible roster for a Telegram group (initData auth). */
 export async function getGroupRosterByTelegramChatId(
   base: string,
   telegramChatId: string,
+  options?: { refresh?: boolean },
 ): Promise<ApiGroupRoster> {
-  const url = `${base}/api/groups/by-telegram-chat/${encodeURIComponent(telegramChatId)}/roster`;
+  const qs = options?.refresh ? "?refresh=1" : "";
+  const url = `${base}/api/groups/by-telegram-chat/${encodeURIComponent(telegramChatId)}/roster${qs}`;
   const res = await apiFetch(url);
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(t || `get group roster failed: ${res.status}`);
+    throw new GroupRosterRequestError(res.status, t);
   }
   return res.json() as Promise<ApiGroupRoster>;
 }

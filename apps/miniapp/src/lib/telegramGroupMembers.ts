@@ -5,6 +5,7 @@ import { isDevMockDataEnabled } from "@/lib/devFlags";
 import {
   getGroupRosterByTelegramChatId,
   getSplitbotApiBase,
+  GroupRosterRequestError,
   resolveBillContextForApi,
 } from "@/lib/splitbotApi";
 import {
@@ -35,6 +36,15 @@ export type TelegramGroupMember = {
 
 /** Members are auto-added to the bill when the Telegram group has at most this many members. */
 export const AUTO_FILL_MAX_GROUP_SIZE = 10;
+
+export type RosterLoadStatus =
+  | "idle"
+  | "loading"
+  | "ok"
+  | "no_context"
+  | "auth_error"
+  | "empty"
+  | "error";
 
 function dedupeNames(names: string[]): string[] {
   const seen = new Set<string>();
@@ -198,6 +208,31 @@ function displayNameFromLaunchUser(
   return String(u.id);
 }
 
+function withCurrentUser(
+  members: TelegramGroupMember[],
+  launch: ReturnType<typeof readTelegramLaunchContext>,
+): TelegramGroupMember[] {
+  const u = launch.currentUser;
+  const selfName = displayNameFromLaunchUser(u);
+  if (u?.id == null || !selfName) return members;
+
+  const existing = members.find((m) => m.tgUserId === u.id);
+  if (existing) {
+    existing.photoUrl = existing.photoUrl ?? u.photo_url;
+    existing.username = existing.username ?? u.username ?? null;
+    return members;
+  }
+  return [
+    {
+      tgUserId: u.id,
+      name: selfName,
+      username: u.username ?? null,
+      photoUrl: u.photo_url,
+    },
+    ...members,
+  ];
+}
+
 async function fetchMembersFromBotApi(
   initData: string,
 ): Promise<TelegramGroupMember[] | null> {
@@ -314,12 +349,15 @@ export type UseTelegramGroupMembersResult = {
   seenCount: number;
   /** max(0, memberCount - seenCount) when memberCount is known. */
   unseenCount: number | null;
+  status: RosterLoadStatus;
+  /** Short reason for empty/error UI (privacy, auth, missing cid, …). */
+  statusMessage: string | null;
 };
 
 /**
  * Resolves group members for add-members UI:
- * stored API roster (bot-visible) → optional mtcute enrichment → start_param →
- * opt-in DEV mocks (`VITE_SPLITBOT_USE_MOCK_DATA=true` only).
+ * stored API roster (bot-visible + admin backfill) → optional mtcute enrichment →
+ * start_param → opt-in DEV mocks.
  */
 export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
   const [launch, setLaunch] = useState(() => readTelegramLaunchContext());
@@ -333,6 +371,10 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
     ).Telegram?.WebApp;
     wa?.ready?.();
     queueMicrotask(() => setLaunch(readTelegramLaunchContext()));
+    const timeouts = [50, 150, 400, 1000, 2000].map((ms) =>
+      setTimeout(() => setLaunch(readTelegramLaunchContext()), ms),
+    );
+    return () => timeouts.forEach(clearTimeout);
   }, []);
 
   const [members, setMembers] = useState<TelegramGroupMember[]>([]);
@@ -340,31 +382,53 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
   const [memberCount, setMemberCount] = useState<number | null>(null);
   const [seenCount, setSeenCount] = useState(0);
   const [unseenCount, setUnseenCount] = useState<number | null>(null);
+  const [status, setStatus] = useState<RosterLoadStatus>("loading");
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const apiBase = getSplitbotApiBase();
     const billCtx = resolveBillContextForApi(launch);
     const botBase = import.meta.env.VITE_BOT_MINIAPP_API;
+    const hasInitData = Boolean(launch.initData?.trim());
     const canFetchRoster =
-      Boolean(apiBase) &&
-      Boolean(billCtx?.telegramChatId) &&
-      Boolean(launch.initData?.trim());
+      Boolean(apiBase) && Boolean(billCtx?.telegramChatId) && hasInitData;
     const canFetchBot =
-      typeof botBase === "string" &&
-      botBase.trim().length > 0 &&
-      Boolean(launch.initData?.trim());
+      typeof botBase === "string" && botBase.trim().length > 0 && hasInitData;
 
     if (!canFetchRoster && !canFetchBot) {
-      const sync = resolveTelegramGroupMembersSync();
+      const sync = withCurrentUser(resolveTelegramGroupMembersSync(), launch);
       setMembers(sync);
       setSeenCount(sync.length);
       setMemberCount(null);
       setUnseenCount(null);
       setIsLoading(false);
+      if (!hasInitData) {
+        setStatus("no_context");
+        setStatusMessage(
+          "Open Splitbot from Telegram via /split in the group so it can load the roster.",
+        );
+      } else if (!billCtx?.telegramChatId) {
+        setStatus("no_context");
+        setStatusMessage(
+          "Missing group id (startapp cid). Re-open with /split in the group.",
+        );
+      } else if (!apiBase) {
+        setStatus("error");
+        setStatusMessage("Mini App was built without VITE_SPLITBOT_API.");
+      } else if (sync.length) {
+        setStatus("ok");
+        setStatusMessage(null);
+      } else {
+        setStatus("empty");
+        setStatusMessage(
+          "No members yet. Run /split in the group, or turn off BotFather /setprivacy / make the bot admin so it can see people.",
+        );
+      }
       return;
     }
 
     setIsLoading(true);
+    setStatus("loading");
     let cancelled = false;
     const sync = resolveTelegramGroupMembersSync();
 
@@ -373,6 +437,8 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
         let rosterMembers: TelegramGroupMember[] = [];
         let nextMemberCount: number | null = null;
         let nextUnseen: number | null = null;
+        let rosterStatus: RosterLoadStatus | null = null;
+        let rosterMessage: string | null = null;
 
         if (canFetchRoster && billCtx) {
           try {
@@ -388,8 +454,23 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
             }));
             nextMemberCount = roster.memberCount;
             nextUnseen = roster.unseenCount;
-          } catch {
+            if (!rosterMembers.length) {
+              rosterStatus = "empty";
+              rosterMessage =
+                "No members yet. Run /split in the group. If the list stays empty, disable BotFather /setprivacy or make the bot a group admin so it can see ordinary messages.";
+            }
+          } catch (err) {
             rosterMembers = [];
+            if (err instanceof GroupRosterRequestError && (err.status === 401 || err.status === 403)) {
+              rosterStatus = "auth_error";
+              rosterMessage =
+                "Could not authorize with Telegram. Close and re-open Splitbot from /split.";
+            } else {
+              rosterStatus = "error";
+              rosterMessage =
+                "Could not load the group roster. Check your connection and try again.";
+            }
+            console.warn("[splitbot] roster fetch failed", err);
           }
         }
 
@@ -408,27 +489,7 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
         if (!merged.length && sync.length) {
           merged = sync;
         }
-
-        // Ensure current Mini App user appears (and keep cheap photo_url).
-        const u = launch.currentUser;
-        const selfName = displayNameFromLaunchUser(u);
-        if (u?.id != null && selfName) {
-          const existing = merged.find((m) => m.tgUserId === u.id);
-          if (existing) {
-            existing.photoUrl = existing.photoUrl ?? u.photo_url;
-            existing.username = existing.username ?? u.username ?? null;
-          } else {
-            merged = [
-              {
-                tgUserId: u.id,
-                name: selfName,
-                username: u.username ?? null,
-                photoUrl: u.photo_url,
-              },
-              ...merged,
-            ];
-          }
-        }
+        merged = withCurrentUser(merged, launch);
 
         setMembers(merged);
         setSeenCount(merged.length);
@@ -440,12 +501,37 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
               ? Math.max(0, nextMemberCount - merged.length)
               : null,
         );
-      } catch {
+
+        if (merged.length > 0) {
+          setStatus("ok");
+          setStatusMessage(
+            nextMemberCount != null && merged.length < nextMemberCount
+              ? `Showing ${merged.length} of ${nextMemberCount} members the bot has seen. Others can be added by name, or make the bot admin / disable privacy so more appear.`
+              : null,
+          );
+        } else if (rosterStatus) {
+          setStatus(rosterStatus);
+          setStatusMessage(rosterMessage);
+        } else {
+          setStatus("empty");
+          setStatusMessage(
+            "No members yet. Run /split in the group, or turn off BotFather /setprivacy / make the bot admin so it can see people.",
+          );
+        }
+      } catch (err) {
         if (!cancelled) {
-          setMembers(sync.length ? sync : []);
-          setSeenCount(sync.length);
+          const fallback = withCurrentUser(sync.length ? sync : [], launch);
+          setMembers(fallback);
+          setSeenCount(fallback.length);
           setMemberCount(null);
           setUnseenCount(null);
+          setStatus(fallback.length ? "ok" : "error");
+          setStatusMessage(
+            fallback.length
+              ? null
+              : "Could not load members. Re-open from /split in the group.",
+          );
+          console.warn("[splitbot] group members resolve failed", err);
         }
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -455,9 +541,23 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
     return () => {
       cancelled = true;
     };
-  }, [launch.initData, launch.currentUser?.id, launch.startParam, launch.chat?.id]);
+  }, [
+    launch.initData,
+    launch.currentUser?.id,
+    launch.startParam,
+    launch.chat?.id,
+    launch.chatType,
+  ]);
 
-  return { members, isLoading, memberCount, seenCount, unseenCount };
+  return {
+    members,
+    isLoading,
+    memberCount,
+    seenCount,
+    unseenCount,
+    status,
+    statusMessage,
+  };
 }
 
 /** @deprecated Prefer `useTelegramGroupMembers()` which returns `{ members, isLoading }`. */

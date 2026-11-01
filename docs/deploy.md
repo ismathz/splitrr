@@ -95,7 +95,8 @@ BotFather checklist:
 2. `/setcommands` (groups + default): `split`, `history`, `help` — remove `newbill`.
 3. Menu Button → same Mini App URL.
 4. Restart bot/API after changing `.env` (deploy does not overwrite `.env`).
-5. **Group roster fill:** Telegram Bot API cannot list all members. Splitbot stores who it can see (admins via `/split`, join/leave, command/message senders, Mini App openers). For a fuller roster, either disable privacy mode (`/setprivacy` → Disable) **or** make the bot a group admin so it sees ordinary messages. No new env vars required for roster.
+5. **Group roster fill:** Telegram Bot API cannot list all members. Splitbot stores who it can see (admins via `/split` + API-side admin backfill on Mini App open, join/leave, command/message senders, Mini App openers). For a fuller roster, either disable privacy mode (`/setprivacy` → Disable) **or** make the bot a group admin so it sees ordinary messages. No new env vars required for roster.
+6. **Shared SQLite:** `SQLITE_PATH` must be the **same absolute path** for `splitbot-api` and `splitbot-bot` (e.g. `/var/lib/splitbot/splitbot.db`). Relative `./data/splitbot.db` under different working directories creates two DBs and the Mini App will not see bot-side roster writes.
 
 ## Mini App build
 Bake API bases at Vite build time (same as the VPS redeploy recipe):
