@@ -7,6 +7,7 @@ const parsedReceiptSchema = z.object({
   merchantName: z.string().nullable().optional(),
   currency: z.string().default("USD"),
   subtotalCents: z.number().int().nullable().optional(),
+  serviceChargeCents: z.number().int().nullable().optional(),
   taxCents: z.number().int().nullable().optional(),
   tipCents: z.number().int().nullable().optional(),
   totalCents: z.number().int().nullable().optional(),
@@ -37,6 +38,7 @@ const RECEIPT_JSON_SCHEMA = {
     merchantName: { type: ["string", "null"] },
     currency: { type: "string" },
     subtotalCents: { type: ["integer", "null"] },
+    serviceChargeCents: { type: ["integer", "null"] },
     taxCents: { type: ["integer", "null"] },
     tipCents: { type: ["integer", "null"] },
     totalCents: { type: ["integer", "null"] },
@@ -67,6 +69,7 @@ const RECEIPT_JSON_SCHEMA = {
     "merchantName",
     "currency",
     "subtotalCents",
+    "serviceChargeCents",
     "taxCents",
     "tipCents",
     "totalCents",
@@ -76,7 +79,7 @@ const RECEIPT_JSON_SCHEMA = {
 } as const;
 
 const SYSTEM_PROMPT =
-  "Extract receipt line-items and totals. Return strict JSON matching schema. Prices must be in cents. Set currency to the ISO 4217 three-letter code implied by the receipt (symbols, text, or country context), e.g. USD, EUR, MVR. If the image is blank, too dark, too blurry, or has no readable receipt text, do not guess. In that case return merchantName=null, rawText='', items=[], subtotalCents=null, taxCents=null, tipCents=null, totalCents=null.";
+  "Extract receipt line-items and totals. Return strict JSON matching schema. Prices must be in cents. Set currency to the ISO 4217 three-letter code implied by the receipt (symbols, text, or country context), e.g. USD, EUR, MVR. Put food/drink goods in items only — do not invent line items. Set serviceChargeCents only when a service charge/fee appears on the receipt (else null). Set taxCents only when tax/GST/VAT appears (else null). Set tipCents only when a tip/gratuity appears separately from service charge (else null). Include discounts as negative totalPriceCents line items when printed on the bill; never invent discounts, service charge, or tax. If the image is blank, too dark, too blurry, or has no readable receipt text, do not guess. In that case return merchantName=null, rawText='', items=[], subtotalCents=null, serviceChargeCents=null, taxCents=null, tipCents=null, totalCents=null.";
 
 /** Build a base64 data URL for vision OCR (OpenRouter cannot fetch private R2 URLs). */
 export function toOcrImageDataUrl(
@@ -177,6 +180,7 @@ export class OpenRouterOcrProvider {
       merchantName: parsed.merchantName ?? undefined,
       currency: normalizeCurrencyCode(parsed.currency),
       subtotalCents: parsed.subtotalCents ?? undefined,
+      serviceChargeCents: parsed.serviceChargeCents ?? undefined,
       taxCents: parsed.taxCents ?? undefined,
       tipCents: parsed.tipCents ?? undefined,
       totalCents: parsed.totalCents ?? undefined,

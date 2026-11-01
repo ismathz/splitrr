@@ -53,10 +53,23 @@ export interface ParsedReceipt {
   merchantName?: string;
   currency: string;
   subtotalCents?: number;
+  /** Service charge amount when present on the receipt (cents). */
+  serviceChargeCents?: number;
   taxCents?: number;
   tipCents?: number;
   totalCents?: number;
+  /**
+   * Inferred service-charge % of food subtotal when `serviceChargeCents` is set.
+   * Null when the amount is present but the rate cannot be inferred.
+   */
+  serviceChargeRatePct?: number | null;
+  /**
+   * Inferred tax % of (food subtotal + service charge when present).
+   * Null when tax is present but the rate cannot be inferred.
+   */
+  taxRatePct?: number | null;
   items: ParsedBillItem[];
+  /** Discounts only when they appear on the bill (negative lines / discount labels). */
   discountAdjustments?: ParsedReceiptAdjustment[];
   rawText: string;
 }

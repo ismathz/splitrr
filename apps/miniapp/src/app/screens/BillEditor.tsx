@@ -532,14 +532,57 @@ export function BillEditor(props: BillEditorProps) {
             assignees: [],
           })),
         );
-        setOcrDiscountAdjustments(
-          (parsed.discountAdjustments ?? []).map((adjustment, i) => ({
-            id: `ocr-discount-${billId}-${i}`,
-            name: adjustment.name || "Discount",
-            amountType: "fixed",
-            value: adjustment.amountCents / 100,
-          })),
-        );
+        const ocrAdjustments: CustomAdjustment[] = (
+          parsed.discountAdjustments ?? []
+        ).map((adjustment, i) => ({
+          id: `ocr-discount-${billId}-${i}`,
+          name: adjustment.name || "Discount",
+          amountType: "fixed" as const,
+          value: adjustment.amountCents / 100,
+        }));
+        // Charges/tax only when present on the receipt — never invent fixed rates.
+        const scCents = parsed.serviceChargeCents ?? 0;
+        const taxCentsFromOcr = parsed.taxCents ?? 0;
+        const scRate =
+          typeof parsed.serviceChargeRatePct === "number" &&
+          parsed.serviceChargeRatePct > 0
+            ? parsed.serviceChargeRatePct
+            : null;
+        const taxRate =
+          typeof parsed.taxRatePct === "number" && parsed.taxRatePct > 0
+            ? parsed.taxRatePct
+            : null;
+        if (scCents > 0 && scRate != null) {
+          setServiceChargeRatePct(scRate);
+          setServiceChargeRateInput(String(scRate));
+          setIsServiceChargeEnabled(true);
+        } else {
+          setIsServiceChargeEnabled(false);
+          if (scCents > 0) {
+            ocrAdjustments.push({
+              id: `ocr-service-${billId}`,
+              name: "Service Charge",
+              amountType: "fixed",
+              value: scCents / 100,
+            });
+          }
+        }
+        if (taxCentsFromOcr > 0 && taxRate != null) {
+          setTaxRatePct(taxRate);
+          setTaxRateInput(String(taxRate));
+          setIsTaxEnabled(true);
+        } else {
+          setIsTaxEnabled(false);
+          if (taxCentsFromOcr > 0) {
+            ocrAdjustments.push({
+              id: `ocr-tax-${billId}`,
+              name: "Tax",
+              amountType: "fixed",
+              value: taxCentsFromOcr / 100,
+            });
+          }
+        }
+        setOcrDiscountAdjustments(ocrAdjustments);
         setOcrPhase("ok");
       } catch (e) {
         if (!cancelled) {
@@ -583,6 +626,7 @@ export function BillEditor(props: BillEditorProps) {
     () => initialBill?.currency ?? "MVR",
   );
   const currencyLabel = currencyCode;
+  // Latent rates for when the user manually adds a charge; OCR overwrites when present.
   const [serviceChargeRatePct, setServiceChargeRatePct] = useState(10);
   const [taxRatePct, setTaxRatePct] = useState(8);
   const [serviceChargeRateInput, setServiceChargeRateInput] = useState("10");
@@ -590,10 +634,9 @@ export function BillEditor(props: BillEditorProps) {
   const [editingRateField, setEditingRateField] = useState<
     "serviceCharge" | "tax" | null
   >(null);
-  const [isServiceChargeEnabled, setIsServiceChargeEnabled] = useState(
-    () => !isEditMode,
-  );
-  const [isTaxEnabled, setIsTaxEnabled] = useState(() => !isEditMode);
+  // Do not auto-apply fixed SC/tax — enable only from OCR (or manual Add).
+  const [isServiceChargeEnabled, setIsServiceChargeEnabled] = useState(false);
+  const [isTaxEnabled, setIsTaxEnabled] = useState(false);
   const [customAdjustments, setCustomAdjustments] = useState<
     CustomAdjustment[]
   >([]);
@@ -1299,15 +1342,6 @@ export function BillEditor(props: BillEditorProps) {
                 ) : null}
                 {ocrPhase === "error" && ocrError ? (
                   <FormErrorAlert message={ocrError} />
-                ) : null}
-                {ocrPhase === "ok" ? (
-                  <p className="text-sm text-muted-foreground">
-                    Currency{" "}
-                    <span className="font-medium text-foreground">
-                      {currencyCode}
-                    </span>{" "}
-                    and line items were loaded from the receipt (server OCR).
-                  </p>
                 ) : null}
                 {ocrPhase === "skipped" && !receiptFile ? (
                   <p className="text-sm text-muted-foreground">
