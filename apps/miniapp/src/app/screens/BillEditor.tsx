@@ -1730,178 +1730,115 @@ export function BillEditor(props: BillEditorProps) {
                 <AutoAnimateContainer className="divide-y">
                   {chargeRowOrder.map((rowId) => {
                     if (rowId === SERVICE_CHARGE_ROW_ID) {
-                      // Hide "Add Service Charge" when OCR found no service charge.
-                      // Manual (non-OCR) bills can still add one.
-                      if (!isServiceChargeEnabled && isFromReceiptScan) {
+                      // Only show when a service charge is active (OCR or added).
+                      if (!isServiceChargeEnabled) {
                         return null;
                       }
                       return (
                         <SortableChargeRow key={rowId} id={rowId}>
-                          {isServiceChargeEnabled ? (
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <div className="font-medium">
-                                  Service Charge
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                  Applied to {currencyLabel}{" "}
-                                  {formatCents(serviceChargeBaseCents)}
-                                </div>
-                              </div>
-
-                              <div className="flex items-start gap-2">
-                                <div className="text-right flex flex-col gap-1">
-                                  <Badge>
-                                    {currencyLabel}{" "}
-                                    {formatCents(serviceChargeCents)}
-                                  </Badge>
-                                  <div className="text-xs text-muted-foreground">
-                                    {editingRateField === "serviceCharge" ? (
-                                      <>
-                                        <input
-                                          autoFocus
-                                          inputMode="decimal"
-                                          aria-label="Service charge percentage"
-                                          value={serviceChargeRateInput}
-                                          onChange={(e) =>
-                                            setServiceChargeRateInput(
-                                              e.target.value,
-                                            )
-                                          }
-                                          onBlur={() => {
-                                            commitPercentageInput(
-                                              serviceChargeRateInput,
-                                              serviceChargeRatePct,
-                                              setServiceChargeRateInput,
-                                              setServiceChargeRatePct,
-                                            );
-                                            setEditingRateField(null);
-                                          }}
-                                          onKeyDown={(e) => {
-                                            if (e.key === "Enter")
-                                              e.currentTarget.blur();
-                                            if (e.key === "Escape") {
-                                              setServiceChargeRateInput(
-                                                String(serviceChargeRatePct),
-                                              );
-                                              setEditingRateField(null);
-                                            }
-                                          }}
-                                          className="h-6 w-16 rounded-md border bg-background px-2 text-right text-xs shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                        />
-                                        <span className="ml-1">%</span>
-                                      </>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        className="hover:underline"
-                                        onClick={() =>
-                                          beginRateEdit("serviceCharge")
-                                        }
-                                      >
-                                        {serviceChargeRatePct} %
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                                <Button
-                                  variant={
-                                    deleteConfirmKey ===
-                                    DELETE_CONFIRM_SERVICE_CHARGE
-                                      ? "destructive"
-                                      : "outline"
-                                  }
-                                  size="xs"
-                                  data-delete-confirm-key={
-                                    DELETE_CONFIRM_SERVICE_CHARGE
-                                  }
-                                  onClick={() => {
-                                    if (
-                                      deleteConfirmKey ===
-                                      DELETE_CONFIRM_SERVICE_CHARGE
-                                    ) {
-                                      setIsServiceChargeEnabled(false);
-                                      setDeleteConfirmKey(null);
-                                      return;
-                                    }
-                                    setDeleteConfirmKey(
-                                      DELETE_CONFIRM_SERVICE_CHARGE,
-                                    );
-                                  }}
-                                  aria-label="Remove service charge"
-                                >
-                                  {deleteConfirmKey ===
-                                  DELETE_CONFIRM_SERVICE_CHARGE ? (
-                                    "Delete"
-                                  ) : (
-                                    <HugeiconsIcon
-                                      icon={DeleteIcon}
-                                      strokeWidth={1.8}
-                                      className="size-3.5"
-                                    />
-                                  )}
-                                </Button>
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <div className="font-medium">Service Charge</div>
+                              <div className="text-xs text-muted-foreground">
+                                Applied to {currencyLabel}{" "}
+                                {formatCents(serviceChargeBaseCents)}
                               </div>
                             </div>
-                          ) : (
-                            <div className="flex items-center justify-between text-sm font-medium">
-                              <button
-                                type="button"
-                                className="hover:underline"
-                                onClick={() => setIsServiceChargeEnabled(true)}
-                              >
-                                Add Service Charge
-                              </button>
-                              <div className="text-muted-foreground">
-                                {editingRateField === "serviceCharge" ? (
-                                  <>
-                                    <input
-                                      autoFocus
-                                      inputMode="decimal"
-                                      aria-label="Service charge percentage"
-                                      value={serviceChargeRateInput}
-                                      onChange={(e) =>
-                                        setServiceChargeRateInput(
-                                          e.target.value,
-                                        )
-                                      }
-                                      onBlur={() => {
-                                        commitPercentageInput(
-                                          serviceChargeRateInput,
-                                          serviceChargeRatePct,
-                                          setServiceChargeRateInput,
-                                          setServiceChargeRatePct,
-                                        );
-                                        setEditingRateField(null);
-                                      }}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter")
-                                          e.currentTarget.blur();
-                                        if (e.key === "Escape") {
+
+                            <div className="flex items-start gap-2">
+                              <div className="text-right flex flex-col gap-1">
+                                <Badge>
+                                  {currencyLabel}{" "}
+                                  {formatCents(serviceChargeCents)}
+                                </Badge>
+                                <div className="text-xs text-muted-foreground">
+                                  {editingRateField === "serviceCharge" ? (
+                                    <>
+                                      <input
+                                        autoFocus
+                                        inputMode="decimal"
+                                        aria-label="Service charge percentage"
+                                        value={serviceChargeRateInput}
+                                        onChange={(e) =>
                                           setServiceChargeRateInput(
-                                            String(serviceChargeRatePct),
+                                            e.target.value,
+                                          )
+                                        }
+                                        onBlur={() => {
+                                          commitPercentageInput(
+                                            serviceChargeRateInput,
+                                            serviceChargeRatePct,
+                                            setServiceChargeRateInput,
+                                            setServiceChargeRatePct,
                                           );
                                           setEditingRateField(null);
-                                        }
-                                      }}
-                                      className="h-6 w-16 rounded-md border bg-background px-2 text-right text-xs shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                    />
-                                    <span className="ml-1">%</span>
-                                  </>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    className="hover:underline"
-                                    onClick={() =>
-                                      beginRateEdit("serviceCharge")
-                                    }
-                                  >
-                                    {serviceChargeRatePct} %
-                                  </button>
-                                )}
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter")
+                                            e.currentTarget.blur();
+                                          if (e.key === "Escape") {
+                                            setServiceChargeRateInput(
+                                              String(serviceChargeRatePct),
+                                            );
+                                            setEditingRateField(null);
+                                          }
+                                        }}
+                                        className="h-6 w-16 rounded-md border bg-background px-2 text-right text-xs shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                      />
+                                      <span className="ml-1">%</span>
+                                    </>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="hover:underline"
+                                      onClick={() =>
+                                        beginRateEdit("serviceCharge")
+                                      }
+                                    >
+                                      {serviceChargeRatePct} %
+                                    </button>
+                                  )}
+                                </div>
                               </div>
+                              <Button
+                                variant={
+                                  deleteConfirmKey ===
+                                  DELETE_CONFIRM_SERVICE_CHARGE
+                                    ? "destructive"
+                                    : "outline"
+                                }
+                                size="xs"
+                                data-delete-confirm-key={
+                                  DELETE_CONFIRM_SERVICE_CHARGE
+                                }
+                                onClick={() => {
+                                  if (
+                                    deleteConfirmKey ===
+                                    DELETE_CONFIRM_SERVICE_CHARGE
+                                  ) {
+                                    setIsServiceChargeEnabled(false);
+                                    setDeleteConfirmKey(null);
+                                    return;
+                                  }
+                                  setDeleteConfirmKey(
+                                    DELETE_CONFIRM_SERVICE_CHARGE,
+                                  );
+                                }}
+                                aria-label="Remove service charge"
+                              >
+                                {deleteConfirmKey ===
+                                DELETE_CONFIRM_SERVICE_CHARGE ? (
+                                  "Delete"
+                                ) : (
+                                  <HugeiconsIcon
+                                    icon={DeleteIcon}
+                                    strokeWidth={1.8}
+                                    className="size-3.5"
+                                  />
+                                )}
+                              </Button>
                             </div>
-                          )}
+                          </div>
                         </SortableChargeRow>
                       );
                     }

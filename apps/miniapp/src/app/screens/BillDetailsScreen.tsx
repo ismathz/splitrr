@@ -45,6 +45,7 @@ import {
   getBillPaymentStatus,
   getSplitbotApiBase,
   resolveBillContextForApi,
+  updateBillDetails,
   updateBillPaymentStatus,
 } from "@/lib/splitbotApi";
 import {
@@ -172,11 +173,11 @@ function formatBillMoney(currencyCode: string, cents: number) {
 function AssigneesRow({
   assignees,
   resolveMember,
-  resolvePhotoUrl,
+  resolvePhotoUrlForName,
 }: {
   assignees: string[];
   resolveMember?: (name: string) => TelegramGroupMember | undefined;
-  resolvePhotoUrl?: (mem: TelegramGroupMember | undefined) => string | undefined;
+  resolvePhotoUrlForName?: (name: string) => string | undefined;
 }) {
   if (assignees.length === 0) {
     return (
@@ -198,7 +199,7 @@ function AssigneesRow({
             <MemberAvatar
               name={member}
               avatarBgColors={mem?.avatarBgColors}
-              photoUrl={resolvePhotoUrl?.(mem)}
+              photoUrl={resolvePhotoUrlForName?.(member)}
             />
             <span>{member}</span>
           </Toggle>
@@ -214,6 +215,10 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
   const [loadBillError, setLoadBillError] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
+  const [titleSaveError, setTitleSaveError] = useState<string | null>(null);
   const splitbotApiBase = useMemo(() => getSplitbotApiBase(), []);
   const launchCtx = useTelegramLaunchContext();
   const { members: groupMembers } = useTelegramGroupMembers();
@@ -226,11 +231,22 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
     for (const m of groupMembers) {
       map.set(m.name, m);
       map.set(m.name.toLowerCase(), m);
+      const username = m.username?.trim();
+      if (username) {
+        map.set(username.toLowerCase(), m);
+        map.set(`@${username.replace(/^@/, "").toLowerCase()}`, m);
+      }
     }
     return map;
   }, [groupMembers]);
-  const resolveMember = (name: string) =>
-    memberByName.get(name) ?? memberByName.get(name.toLowerCase());
+  const resolveMember = (name: string) => {
+    const t = name.trim();
+    return (
+      memberByName.get(t) ??
+      memberByName.get(t.toLowerCase()) ??
+      memberByName.get(t.replace(/^@/, "").toLowerCase())
+    );
+  };
   const resolveMemberPhotoUrl = (mem: TelegramGroupMember | undefined) => {
     if (!mem) return undefined;
     if (mem.photoUrl) return mem.photoUrl;
@@ -238,6 +254,20 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
       return `${miniappApiBase}${mem.avatarProxyPath}`;
     }
     return undefined;
+  };
+  const photoUrlByMemberName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const profile of serverBill?.memberProfiles ?? []) {
+      const url = profile.photoUrl?.trim();
+      if (!url) continue;
+      map.set(profile.name.trim().toLowerCase(), url);
+    }
+    return map;
+  }, [serverBill?.memberProfiles]);
+  const resolvePhotoUrlForName = (name: string) => {
+    const fromApi = photoUrlByMemberName.get(name.trim().toLowerCase());
+    if (fromApi) return fromApi;
+    return resolveMemberPhotoUrl(resolveMember(name));
   };
   const billApiContext = useMemo(
     () => resolveBillContextForApi(launchCtx),
@@ -296,6 +326,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
         setServerBill({
           ...fetched,
           members,
+          memberProfiles: fetched.memberProfiles ?? [],
           items,
         });
       } catch (e) {
@@ -397,10 +428,21 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
       return nextSet;
     });
     try {
-      await updateBillPaymentStatus(splitbotApiBase, billId, {
+      const result = await updateBillPaymentStatus(splitbotApiBase, billId, {
         name,
         paid: next,
       });
+      if (result.status) {
+        setServerBill((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: result.status!,
+                settled: result.status === "completed",
+              }
+            : prev,
+        );
+      }
     } catch (e) {
       const message = toUserFriendlyErrorMessage(e);
       // Revert immediately when persistence fails.
@@ -419,6 +461,38 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
         nextSet.delete(name);
         return nextSet;
       });
+    }
+  };
+
+  const saveBillTitle = async () => {
+    if (!bill) return;
+    const nextTitle = draftTitle.trim() || "Untitled bill";
+    setIsEditingTitle(false);
+    setTitleSaveError(null);
+    if (nextTitle === bill.title) return;
+
+    setServerBill((prev) => (prev ? { ...prev, title: nextTitle } : prev));
+    if (!splitbotApiBase) return;
+
+    setIsSavingTitle(true);
+    try {
+      await updateBillDetails(splitbotApiBase, billId, {
+        title: nextTitle,
+        billDate: bill.billDate,
+        place: bill.place,
+        members: membersOrdered,
+        items: bill.items.map((item) => ({
+          id: item.id,
+          name: item.name,
+          totalPriceCents: item.totalPriceCents,
+          assignees: item.assignees ?? [],
+        })),
+      });
+    } catch (e) {
+      setTitleSaveError(toUserFriendlyErrorMessage(e));
+      setReloadToken((t) => t + 1);
+    } finally {
+      setIsSavingTitle(false);
     }
   };
 
@@ -669,7 +743,42 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
 
       <div className="space-y-4">
         <div className="min-w-0 space-y-1">
-          <CardTitle className="text-xl">{bill.title}</CardTitle>
+          {isEditingTitle ? (
+            <input
+              autoFocus
+              value={draftTitle}
+              disabled={isSavingTitle}
+              onChange={(e) => setDraftTitle(e.target.value)}
+              onBlur={() => {
+                void saveBillTitle();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") {
+                  setIsEditingTitle(false);
+                  setDraftTitle(bill.title);
+                }
+              }}
+              className="h-9 w-full rounded-md border bg-background px-3 text-xl font-semibold shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              aria-label="Bill title"
+            />
+          ) : (
+            <button
+              type="button"
+              className="text-left"
+              onClick={() => {
+                setDraftTitle(bill.title);
+                setIsEditingTitle(true);
+              }}
+            >
+              <CardTitle className="text-xl hover:underline">
+                {bill.title}
+              </CardTitle>
+            </button>
+          )}
+          {titleSaveError ? (
+            <p className="text-sm text-destructive">{titleSaveError}</p>
+          ) : null}
           <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span>{formatBillDateLabel(bill.billDate)}</span>
             {bill.place ? (
@@ -710,7 +819,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                 <AssigneesRow
                   assignees={item.assignees}
                   resolveMember={resolveMember}
-                  resolvePhotoUrl={resolveMemberPhotoUrl}
+                  resolvePhotoUrlForName={resolvePhotoUrlForName}
                 />
               </div>
             </Card>
@@ -792,7 +901,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                           <MemberAvatar
                             name={name}
                             avatarBgColors={mem?.avatarBgColors}
-                            photoUrl={resolveMemberPhotoUrl(mem)}
+                            photoUrl={resolvePhotoUrlForName(name)}
                           />
                           <span
                             className={`truncate font-medium ${paid ? "text-muted-foreground line-through" : ""}`}

@@ -28,7 +28,15 @@ export function statusFromPaymentChecklist(input: {
       ? input.paidByName
       : new Map(Object.entries(input.paidByName));
 
-  const allPaid = names.every((name) => paidLookup.get(name) === true);
+  // Case-insensitive paid lookup (UI / DB names can differ in casing).
+  const paidByLower = new Map<string, boolean>();
+  for (const [key, value] of paidLookup.entries()) {
+    paidByLower.set(key.trim().toLowerCase(), value === true);
+  }
+
+  const allPaid = names.every(
+    (name) => paidByLower.get(name.toLowerCase()) === true,
+  );
   return allPaid ? "completed" : "pending";
 }
 
@@ -44,13 +52,16 @@ export function normalizeBillSessionStatus(
   return "draft";
 }
 
-/** When a bill is shared/opened with members, promote draft → pending. */
+/**
+ * When a bill is opened/saved/shared, promote draft → pending.
+ * `memberCount` is accepted for call-site compat but no longer required:
+ * opening the bill is enough (draft is only for pre-open editing).
+ */
 export function statusAfterOpenWithMembers(input: {
   currentStatus: string | null | undefined;
-  memberCount: number;
+  memberCount?: number;
 }): BillSessionStatus {
   const current = normalizeBillSessionStatus(input.currentStatus);
   if (current === "completed") return "completed";
-  if (input.memberCount > 0) return "pending";
-  return current;
+  return "pending";
 }
