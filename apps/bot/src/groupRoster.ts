@@ -20,7 +20,9 @@ function isGroupChat(
 
 /**
  * Record every human Telegram user the bot can see in a group update.
- * Sources: message/command sender, new_chat_members, left_chat_member.
+ * Sources: any message/edited_message/command sender, new_chat_members,
+ * left_chat_member. With BotFather privacy OFF, ordinary group messages
+ * deliver every sender into SQLite via this path.
  */
 export function ingestVisibleGroupUsers(input: {
   ctx: Context;
@@ -41,7 +43,12 @@ export function ingestVisibleGroupUsers(input: {
     roster.observeTelegramUser(groupId, from);
   }
 
-  const msg = ctx.message ?? ctx.channelPost;
+  // message | edited_message | channel_post — join/leave service payloads.
+  const msg =
+    ctx.message ??
+    ctx.editedMessage ??
+    ctx.channelPost ??
+    ctx.editedChannelPost;
   if (!msg || typeof msg !== "object") return;
 
   const newcomers = (msg as { new_chat_members?: TelegramUserLike[] })
