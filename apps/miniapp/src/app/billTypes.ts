@@ -32,5 +32,7 @@ export type BillDetails = {
   place: string | null;
   /** False until everyone has settled up. */
   settled: boolean;
+  /** Bill participants persisted independently of item assignees. */
+  members?: string[];
   items: Item[];
 };

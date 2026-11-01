@@ -6,6 +6,7 @@ import {
   v3BillCurrency,
   v4MemberPaymentStatus,
   v5GroupRoster,
+  v6BillSessionMembers,
 } from "./schema";
 
 const orderedMigrations: Array<{ name: string; sql: string }> = [
@@ -14,6 +15,7 @@ const orderedMigrations: Array<{ name: string; sql: string }> = [
   { name: "003_bill_currency.sql", sql: v3BillCurrency },
   { name: "004_member_payment_status.sql", sql: v4MemberPaymentStatus },
   { name: "005_group_roster.sql", sql: v5GroupRoster },
+  { name: "006_bill_session_members.sql", sql: v6BillSessionMembers },
 ];
 
 export function applyMigrations(db: Database): void {

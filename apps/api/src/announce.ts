@@ -73,10 +73,15 @@ export function buildBillAnnounceOpenUrl(input: {
   botUsername: string;
   shortName: string;
   telegramChatId: string;
+  /** When set, Mini App opens this bill's details instead of home. */
+  billId?: string;
 }): string | null {
   return buildDirectMiniAppLink({
     botUsername: input.botUsername,
     shortName: input.shortName,
-    payload: { cid: input.telegramChatId }
+    payload: {
+      cid: input.telegramChatId,
+      ...(input.billId ? { bid: input.billId } : {})
+    }
   });
 }

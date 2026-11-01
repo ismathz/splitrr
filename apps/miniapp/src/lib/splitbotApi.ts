@@ -221,6 +221,8 @@ export type ApiBillDetails = {
   billDate: string;
   place: string | null;
   settled: boolean;
+  /** First-class bill participants (may include people not yet on any item). */
+  members?: string[];
   items: Array<{
     id: string;
     name: string;
@@ -329,6 +331,7 @@ export async function updateBillDetails(
     title: string;
     billDate?: string;
     place?: string | null;
+    members?: string[];
     items?: Array<{
       id?: string;
       name: string;

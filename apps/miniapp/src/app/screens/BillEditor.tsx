@@ -286,6 +286,7 @@ export interface BillEditorInitialBill {
   billDate: string;
   place: string | null;
   currency: string;
+  members?: string[];
   items: Item[];
 }
 
@@ -410,6 +411,9 @@ export function BillEditor(props: BillEditorProps) {
   const [billMembers, setBillMembers] = useState<string[]>(() => {
     if (initialBill) {
       const members = new Set<string>();
+      for (const m of initialBill.members ?? []) {
+        if (m.trim()) members.add(m.trim());
+      }
       for (const it of initialBill.items) {
         for (const a of it.assignees) members.add(a);
       }
@@ -1061,6 +1065,18 @@ export function BillEditor(props: BillEditorProps) {
   const saveBill = useCallback(async () => {
     setSaveBillError(null);
 
+    const persistPayload = {
+      billDate,
+      place: billPlace.trim() || null,
+      members: billMembersOrdered,
+      items: items.map((it) => ({
+        id: it.id,
+        name: it.name,
+        totalPriceCents: it.totalPriceCents,
+        assignees: it.assignees,
+      })),
+    };
+
     // Edit mode: PATCH the existing bill.
     if (isEditMode && editingBillId && splitbotApiBase) {
       setIsSavingBill(true);
@@ -1068,14 +1084,7 @@ export function BillEditor(props: BillEditorProps) {
         const normalizedTitle = billTitle.trim() || "Untitled bill";
         await updateBillDetails(splitbotApiBase, editingBillId, {
           title: normalizedTitle,
-          billDate,
-          place: billPlace.trim() || null,
-          items: items.map((it) => ({
-            id: it.id,
-            name: it.name,
-            totalPriceCents: it.totalPriceCents,
-            assignees: it.assignees,
-          })),
+          ...persistPayload,
         });
         props.onSaveComplete?.();
       } catch (e) {
@@ -1086,9 +1095,21 @@ export function BillEditor(props: BillEditorProps) {
       return;
     }
 
-    // Create mode: if a server bill already exists (from OCR), just open it.
-    if (serverBillId) {
-      props.onOpenBill?.(serverBillId);
+    // Create mode: persist items/members (OCR creates the session but not assignments).
+    if (serverBillId && splitbotApiBase) {
+      setIsSavingBill(true);
+      try {
+        const normalizedTitle = billTitle.trim() || "Untitled bill";
+        await updateBillDetails(splitbotApiBase, serverBillId, {
+          title: normalizedTitle,
+          ...persistPayload,
+        });
+        props.onOpenBill?.(serverBillId);
+      } catch (e) {
+        setSaveBillError(toUserFriendlyErrorMessage(e));
+      } finally {
+        setIsSavingBill(false);
+      }
       return;
     }
 
@@ -1096,17 +1117,21 @@ export function BillEditor(props: BillEditorProps) {
     setIsSavingBill(true);
     try {
       const day = new Date().toISOString().slice(0, 10);
-      const title = `Bill ${day}`;
+      const title = billTitle.trim() || `Bill ${day}`;
       const { billId } = await createBillSession(splitbotApiBase, {
         telegramChatId: billApiContext.telegramChatId,
         groupTitle: billApiContext.groupTitle,
         title,
         createdByUserId: launchCtx.currentUser?.id,
-        billDate: day,
-        place: null,
+        billDate: billDate || day,
+        place: billPlace.trim() || null,
         currency: normalizeCurrencyCode(currencyCode),
       });
       setServerBillId(billId);
+      await updateBillDetails(splitbotApiBase, billId, {
+        title,
+        ...persistPayload,
+      });
       props.onOpenBill?.(billId);
     } catch (e) {
       setSaveBillError(toUserFriendlyErrorMessage(e));
@@ -1124,6 +1149,7 @@ export function BillEditor(props: BillEditorProps) {
     billTitle,
     billDate,
     billPlace,
+    billMembersOrdered,
     items,
     props,
   ]);
@@ -1405,12 +1431,12 @@ export function BillEditor(props: BillEditorProps) {
                             e.currentTarget.blur();
                           }
                         }}
-                        className="h-7 w-44 rounded-md border bg-background px-2 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        className="h-7 w-44 rounded-md border bg-background px-2 text-left text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       />
                     ) : (
                       <button
                         type="button"
-                        className="bg-transparent border-0 p-0 font-medium hover:underline focus-visible:outline-none"
+                        className="bg-transparent border-0 p-0 text-left font-medium hover:underline focus-visible:outline-none"
                         onClick={() => {
                           setEditingItemId(item.id);
                           setEditingField("name");
@@ -1557,16 +1583,16 @@ export function BillEditor(props: BillEditorProps) {
                 Add item
               </DialogTrigger>
               <DialogContent>
-                <DialogHeader>
+                <DialogHeader className="text-left">
                   <DialogTitle>Add item</DialogTitle>
                   <DialogDescription>
                     Add a custom item and assign it after saving.
                   </DialogDescription>
                 </DialogHeader>
 
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2 text-left">
                   <label
-                    className="text-sm font-medium"
+                    className="text-left text-sm font-medium"
                     htmlFor="manual-item-name"
                   >
                     Item name
@@ -1584,11 +1610,11 @@ export function BillEditor(props: BillEditorProps) {
                       submitManualItem();
                     }}
                     placeholder="e.g., Dessert"
-                    className="h-9 rounded-md border bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="h-9 rounded-md border bg-background px-3 text-left text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   />
 
                   <label
-                    className="text-sm font-medium"
+                    className="text-left text-sm font-medium"
                     htmlFor="manual-item-total"
                   >
                     Total price
@@ -1607,7 +1633,7 @@ export function BillEditor(props: BillEditorProps) {
                       submitManualItem();
                     }}
                     placeholder="e.g., 12.50"
-                    className="h-9 rounded-md border bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="h-9 rounded-md border bg-background px-3 text-left text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   />
 
                   <FormErrorAlert message={manualItemError} />

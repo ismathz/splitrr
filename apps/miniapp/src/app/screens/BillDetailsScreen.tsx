@@ -189,12 +189,21 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
       try {
         const fetched = await getBillDetails(splitbotApiBase, billId);
         if (cancelled) return;
+        const items = fetched.items.map((item) => ({
+          ...item,
+          assignees: item.assignees ?? [],
+        }));
+        const membersFromApi = (fetched.members ?? [])
+          .map((m) => m.trim())
+          .filter(Boolean);
+        const members =
+          membersFromApi.length > 0
+            ? membersFromApi
+            : uniqueMembersInOrder(items);
         setServerBill({
           ...fetched,
-          items: fetched.items.map((item) => ({
-            ...item,
-            assignees: item.assignees ?? [],
-          })),
+          members,
+          items,
         });
       } catch (e) {
         if (cancelled) return;
@@ -213,10 +222,14 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
     };
   }, [billId, splitbotApiBase, mockBill, reloadToken]);
 
-  const membersOrdered = useMemo(
-    () => (bill ? uniqueMembersInOrder(bill.items) : []),
-    [bill],
-  );
+  const membersOrdered = useMemo(() => {
+    if (!bill) return [];
+    const fromMembers = (bill.members ?? [])
+      .map((m) => m.trim())
+      .filter(Boolean);
+    if (fromMembers.length > 0) return fromMembers;
+    return uniqueMembersInOrder(bill.items);
+  }, [bill]);
   const balances = useMemo(
     () =>
       bill ? balancesCentsByMember(bill.items) : new Map<string, number>(),
@@ -454,6 +467,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
             billDate: bill.billDate,
             place: bill.place ?? null,
             currency: bill.currency,
+            members: membersOrdered,
             items: bill.items.map((item) => ({
               ...item,
               assignees: item.assignees ?? [],

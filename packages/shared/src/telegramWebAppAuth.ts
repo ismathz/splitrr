@@ -149,15 +149,57 @@ export function parseTelegramUserFromInitData(
   }
 }
 
-export type StartParamPayload = { cid: string; members?: string[] };
+export type StartParamPayload = {
+  cid: string;
+  /** Bill session id — Mini App should open `/bills/$bid` when present. */
+  bid?: string;
+  members?: string[];
+};
 
 /** Base64url JSON for `tgWebAppStartParam` / `start_param` / `startapp`. */
 export function encodeStartParamPayload(payload: StartParamPayload): string {
   let json = JSON.stringify(payload);
   if (json.length > 1800) {
-    json = JSON.stringify({ cid: payload.cid });
+    // Prefer keeping bill deep-link target when truncating bulky member lists.
+    json = JSON.stringify(
+      payload.bid
+        ? { cid: payload.cid, bid: payload.bid }
+        : { cid: payload.cid }
+    );
   }
   return Buffer.from(json, "utf8").toString("base64url");
+}
+
+function parseStartParamObject(raw: string): Record<string, unknown> | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const tryJson = (s: string): Record<string, unknown> | null => {
+    try {
+      const parsed: unknown = JSON.parse(s);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  };
+
+  const direct = tryJson(trimmed);
+  if (direct) return direct;
+
+  try {
+    const pad =
+      trimmed.length % 4 === 0 ? "" : "=".repeat(4 - (trimmed.length % 4));
+    const decoded = Buffer.from(
+      trimmed.replace(/-/g, "+").replace(/_/g, "/") + pad,
+      "base64"
+    ).toString("utf8");
+    return tryJson(decoded);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -199,34 +241,18 @@ export function parseTelegramChatIdFromInitData(initData: string): string | null
 
 /** Decode `cid` from start_param / startapp (JSON or base64url JSON). */
 export function parseChatIdFromStartParam(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
+  const obj = parseStartParamObject(raw);
+  if (!obj || !("cid" in obj)) return null;
+  const v = obj.cid;
+  if (v == null || !String(v).trim()) return null;
+  return String(v).trim();
+}
 
-  const tryJson = (s: string): string | null => {
-    try {
-      const parsed: unknown = JSON.parse(s);
-      if (parsed && typeof parsed === "object" && "cid" in parsed) {
-        const v = (parsed as { cid?: unknown }).cid;
-        if (v != null && String(v).trim()) return String(v);
-      }
-    } catch {
-      return null;
-    }
-    return null;
-  };
-
-  const direct = tryJson(trimmed);
-  if (direct) return direct;
-
-  try {
-    const pad =
-      trimmed.length % 4 === 0 ? "" : "=".repeat(4 - (trimmed.length % 4));
-    const decoded = Buffer.from(
-      trimmed.replace(/-/g, "+").replace(/_/g, "/") + pad,
-      "base64"
-    ).toString("utf8");
-    return tryJson(decoded);
-  } catch {
-    return null;
-  }
+/** Decode bill id (`bid`) from start_param / startapp (JSON or base64url JSON). */
+export function parseBillIdFromStartParam(raw: string): string | null {
+  const obj = parseStartParamObject(raw);
+  if (!obj || !("bid" in obj)) return null;
+  const v = obj.bid;
+  if (v == null || !String(v).trim()) return null;
+  return String(v).trim();
 }

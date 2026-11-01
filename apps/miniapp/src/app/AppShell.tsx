@@ -1,17 +1,32 @@
-import React from "react";
-import { Outlet, useNavigate } from "@tanstack/react-router";
+import React, { useEffect, useRef } from "react";
+import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { parseBillIdFromStartParam } from "@splitbot/shared";
 
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { useTelegramLaunchContext } from "@/lib/telegramLaunchContext";
 
 export function AppShell() {
   const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const launchCtx = useTelegramLaunchContext();
+  const didRouteBillDeepLink = useRef(false);
+
+  useEffect(() => {
+    if (didRouteBillDeepLink.current) return;
+    const billId = launchCtx.startParam
+      ? parseBillIdFromStartParam(launchCtx.startParam)
+      : null;
+    if (!billId) return;
+
+    // Only auto-route from home (announce/share opens Mini App on `/`).
+    if (pathname !== "/") return;
+
+    didRouteBillDeepLink.current = true;
+    void navigate({
+      to: "/bills/$billId",
+      params: { billId },
+      replace: true,
+    });
+  }, [launchCtx.startParam, pathname, navigate]);
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-md p-4 space-y-6">
