@@ -60,6 +60,7 @@ export class OpenAiOcrProvider {
         format: {
           type: "json_schema",
           name: "parsed_receipt",
+          strict: true,
           schema: {
             type: "object",
             additionalProperties: false,
@@ -108,7 +109,11 @@ export class OpenAiOcrProvider {
       }
     });
 
-    const payload = JSON.parse(response.output_text);
+    const rawText = response.output_text;
+    if (!rawText?.trim()) {
+      throw new Error("OpenAI returned empty OCR output");
+    }
+    const payload = JSON.parse(rawText);
     const parsed = parsedReceiptSchema.parse(payload);
     return {
       merchantName: parsed.merchantName ?? undefined,

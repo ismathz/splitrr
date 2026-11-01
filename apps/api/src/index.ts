@@ -10,7 +10,7 @@ import {
 } from "@splitbot/db";
 import type { ParsedReceipt, ParsedReceiptAdjustment } from "@splitbot/shared";
 import { env } from "./env";
-import { StorageService } from "./storage";
+import { classifyStorageError, StorageService } from "./storage";
 import { OpenAiOcrProvider } from "./ocr";
 import { requireCronSecret, requireTelegramAuth } from "./auth";
 import { RateLimiter } from "./rateLimit";
@@ -25,6 +25,11 @@ import {
 import { authorizeRosterChatAccess } from "./roster";
 import { backfillRosterFromBotApi } from "./telegramRosterBackfill";
 import { buildTelegramDiag, type TelegramDiag } from "./telegramDiag";
+import {
+  classifyOpenAiError,
+  listRecentPipelineFailures,
+  recordPipelineFailure
+} from "./pipelineErrors";
 
 const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
@@ -137,7 +142,22 @@ app.use(
 
 app.onError((err, c) => {
   console.error("[api]", err);
-  return c.json({ error: "internal_error" }, 500);
+  const name = err instanceof Error ? err.name : "Error";
+  const message = err instanceof Error ? err.message : String(err);
+  // Never leak stacks/secrets; surface a short code for Mini App / dig.
+  return c.json(
+    {
+      error: "internal_error",
+      code: name,
+      message:
+        /S3|NoSuchBucket|AccessDenied|checksum|OpenAI|ECONNREFUSED|ENOTFOUND/i.test(
+          `${name} ${message}`
+        )
+          ? "Storage or OCR backend failed. Check API logs /api/pipeline/last-failures."
+          : "Something went wrong while processing the receipt."
+    },
+    500
+  );
 });
 
 let telegramDiagCache: TelegramDiag | null = null;
@@ -171,6 +191,7 @@ void getTelegramDiagCached().catch((err) =>
 
 async function healthPayload() {
   const telegram = await getTelegramDiagCached();
+  const openaiKey = env.OPENAI_API_KEY?.trim() ?? "";
   return {
     ok: true as const,
     service: "api",
@@ -185,6 +206,22 @@ async function healthPayload() {
       getMeOk: telegram.getMe.ok,
       getMeError: telegram.getMe.error ?? null,
       tokenMatchesExpectedBot: telegram.tokenMatchesExpectedBot
+    },
+    openai: {
+      keyConfigured: openaiKey.length > 0,
+      keySuffix: openaiKey ? openaiKey.slice(-4) : null,
+      model: env.OPENAI_MODEL
+    },
+    storage: {
+      endpointHost: (() => {
+        try {
+          return new URL(env.S3_ENDPOINT).host;
+        } catch {
+          return null;
+        }
+      })(),
+      bucket: env.S3_BUCKET,
+      keyPrefix: env.S3_KEY_PREFIX
     }
   };
 }
@@ -198,6 +235,7 @@ app.use("/api/*", async (c, next) => {
   if (
     c.req.path === "/api/health" ||
     c.req.path === "/api/auth/last-failures" ||
+    c.req.path === "/api/pipeline/last-failures" ||
     c.req.path.startsWith("/api/reminders/")
   ) {
     return next();
@@ -216,6 +254,14 @@ app.get("/api/auth/last-failures", async (c) => {
     failures: listRecentAuthFailures()
   });
 });
+
+/** Temporary: last receipt upload/OCR failures (codes only — no image bytes/secrets). */
+app.get("/api/pipeline/last-failures", (c) =>
+  c.json({
+    ok: true,
+    failures: listRecentPipelineFailures()
+  })
+);
 
 app.post("/api/bills", async (c) => {
   const body = await c.req.json<{
@@ -268,26 +314,57 @@ app.post("/api/bills/:billId/receipt", async (c) => {
   }
 
   if (!(file instanceof File)) {
-    return c.json({ error: "file is required" }, 400);
+    return c.json({ error: "file is required", code: "file_required" }, 400);
   }
 
   const validatedFile = validateReceiptFile(file);
   if (!validatedFile.ok) {
-    return c.json({ error: validatedFile.message }, 400);
+    return c.json(
+      { error: validatedFile.message, code: "invalid_receipt_file" },
+      400
+    );
   }
 
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const key = `${billId}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
-  const stored = await storage.putObject(key, bytes, validatedFile.mime);
-  const signedUrl = await storage.getSignedUrl(stored.key);
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const safeName = (file.name || "receipt.jpg").replace(/[^\w.\-]+/g, "_");
+    const key = `${billId}/${Date.now()}-${safeName}`;
+    const stored = await storage.putObject(key, bytes, validatedFile.mime);
+    const signedUrl = await storage.getSignedUrl(stored.key);
 
-  db.query(
-    `INSERT INTO receipt_images (id, bill_session_id, storage_key, mime_type, size_bytes, ocr_status)
-     VALUES (?1, ?2, ?3, ?4, ?5, 'pending')`
-  ).run(randomUUID(), billId, stored.key, stored.contentType, stored.sizeBytes);
+    db.query(
+      `INSERT INTO receipt_images (id, bill_session_id, storage_key, mime_type, size_bytes, ocr_status)
+       VALUES (?1, ?2, ?3, ?4, ?5, 'pending')`
+    ).run(
+      randomUUID(),
+      billId,
+      stored.key,
+      stored.contentType,
+      stored.sizeBytes
+    );
 
-  sessions.updateStatus(billId, "draft");
-  return c.json({ key: stored.key, signedUrl });
+    sessions.updateStatus(billId, "draft");
+    return c.json({ key: stored.key, signedUrl });
+  } catch (err) {
+    const classified = classifyStorageError(err);
+    console.error("[receipt-upload]", classified.code, err);
+    recordPipelineFailure({
+      stage: "upload",
+      path: c.req.path,
+      code: classified.code,
+      message: classified.message,
+      httpStatus: classified.status,
+      mime: validatedFile.mime,
+      sizeBytes: file.size
+    });
+    return c.json(
+      {
+        error: classified.message,
+        code: classified.code
+      },
+      classified.status as 502
+    );
+  }
 });
 
 app.post("/api/bills/:billId/ocr", async (c) => {
@@ -396,10 +473,25 @@ app.post("/api/bills/:billId/ocr", async (c) => {
         `UPDATE receipt_images SET ocr_status = 'failed' WHERE id = ?1`
       ).run(receiptRow.id);
     }
-    console.error("[ocr]", err);
+    const classified = classifyOpenAiError(err);
+    console.error("[ocr]", classified.code, err);
+    recordPipelineFailure({
+      stage: "ocr",
+      path: c.req.path,
+      code: classified.code,
+      message: classified.message,
+      httpStatus: classified.status,
+      openaiStatus: classified.openaiStatus,
+      openaiCode: classified.openaiCode
+    });
     return c.json(
-      { error: "OCR failed. Try a clearer photo or add items manually." },
-      502
+      {
+        error: classified.message,
+        code: classified.code,
+        openaiStatus: classified.openaiStatus ?? null,
+        openaiCode: classified.openaiCode ?? null
+      },
+      classified.status as 502
     );
   }
 });
