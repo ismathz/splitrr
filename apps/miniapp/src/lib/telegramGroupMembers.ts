@@ -3,6 +3,11 @@ import { useEffect, useState } from "react";
 import { mockMembers } from "@/app/billDevMocks";
 import { isDevMockDataEnabled } from "@/lib/devFlags";
 import {
+  getGroupRosterByTelegramChatId,
+  getSplitbotApiBase,
+  resolveBillContextForApi,
+} from "@/lib/splitbotApi";
+import {
   logTelegramInitDataOnce,
   readTelegramLaunchContext,
 } from "@/lib/telegramLaunchContext";
@@ -10,6 +15,7 @@ import {
 export type TelegramGroupMember = {
   tgUserId?: number;
   name: string;
+  username?: string | null;
   /**
    * Telegram-provided placeholder background colors for profile-photo
    * fallback avatars (RGB24 ints).
@@ -180,6 +186,18 @@ function resolveTelegramGroupMembersSync(): TelegramGroupMember[] {
   return [];
 }
 
+function displayNameFromLaunchUser(
+  u: { id: number; first_name?: string; last_name?: string; username?: string } | undefined,
+): string | null {
+  if (!u) return null;
+  const first = u.first_name?.trim() ?? "";
+  const last = u.last_name?.trim() ?? "";
+  const full = `${first} ${last}`.trim();
+  if (full) return full;
+  if (u.username?.trim()) return u.username.trim();
+  return String(u.id);
+}
+
 async function fetchMembersFromBotApi(
   initData: string,
 ): Promise<TelegramGroupMember[] | null> {
@@ -247,13 +265,60 @@ async function fetchMembersFromBotApi(
   return out;
 }
 
+function mergeMemberLists(
+  primary: TelegramGroupMember[],
+  secondary: TelegramGroupMember[],
+): TelegramGroupMember[] {
+  const byId = new Map<number, TelegramGroupMember>();
+  const byName = new Map<string, TelegramGroupMember>();
+  const out: TelegramGroupMember[] = [];
+
+  const push = (mem: TelegramGroupMember) => {
+    const nameKey = mem.name.toLowerCase();
+    if (mem.tgUserId != null && byId.has(mem.tgUserId)) {
+      const existing = byId.get(mem.tgUserId)!;
+      existing.photoUrl = existing.photoUrl ?? mem.photoUrl;
+      existing.avatarProxyPath = existing.avatarProxyPath ?? mem.avatarProxyPath;
+      existing.avatarBgColors = existing.avatarBgColors ?? mem.avatarBgColors;
+      existing.username = existing.username ?? mem.username;
+      return;
+    }
+    if (byName.has(nameKey)) {
+      const existing = byName.get(nameKey)!;
+      existing.tgUserId = existing.tgUserId ?? mem.tgUserId;
+      existing.photoUrl = existing.photoUrl ?? mem.photoUrl;
+      existing.avatarProxyPath = existing.avatarProxyPath ?? mem.avatarProxyPath;
+      existing.avatarBgColors = existing.avatarBgColors ?? mem.avatarBgColors;
+      existing.username = existing.username ?? mem.username;
+      if (mem.tgUserId != null && existing.tgUserId != null) {
+        byId.set(existing.tgUserId, existing);
+      }
+      return;
+    }
+    const copy = { ...mem };
+    out.push(copy);
+    byName.set(nameKey, copy);
+    if (copy.tgUserId != null) byId.set(copy.tgUserId, copy);
+  };
+
+  for (const m of primary) push(m);
+  for (const m of secondary) push(m);
+  return out;
+}
+
 export type UseTelegramGroupMembersResult = {
   members: TelegramGroupMember[];
   isLoading: boolean;
+  /** Telegram getChatMemberCount when known; otherwise null. */
+  memberCount: number | null;
+  seenCount: number;
+  /** max(0, memberCount - seenCount) when memberCount is known. */
+  unseenCount: number | null;
 };
 
 /**
- * Resolves group member display names: bot API (mtcute) → `start_param` →
+ * Resolves group members for add-members UI:
+ * stored API roster (bot-visible) → optional mtcute enrichment → start_param →
  * opt-in DEV mocks (`VITE_SPLITBOT_USE_MOCK_DATA=true` only).
  */
 export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
@@ -272,16 +337,29 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
 
   const [members, setMembers] = useState<TelegramGroupMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [memberCount, setMemberCount] = useState<number | null>(null);
+  const [seenCount, setSeenCount] = useState(0);
+  const [unseenCount, setUnseenCount] = useState<number | null>(null);
 
   useEffect(() => {
-    const base = import.meta.env.VITE_BOT_MINIAPP_API;
-    const canFetch =
-      typeof base === "string" &&
-      base.trim().length > 0 &&
+    const apiBase = getSplitbotApiBase();
+    const billCtx = resolveBillContextForApi(launch);
+    const botBase = import.meta.env.VITE_BOT_MINIAPP_API;
+    const canFetchRoster =
+      Boolean(apiBase) &&
+      Boolean(billCtx?.telegramChatId) &&
+      Boolean(launch.initData?.trim());
+    const canFetchBot =
+      typeof botBase === "string" &&
+      botBase.trim().length > 0 &&
       Boolean(launch.initData?.trim());
 
-    if (!canFetch) {
-      setMembers(resolveTelegramGroupMembersSync());
+    if (!canFetchRoster && !canFetchBot) {
+      const sync = resolveTelegramGroupMembersSync();
+      setMembers(sync);
+      setSeenCount(sync.length);
+      setMemberCount(null);
+      setUnseenCount(null);
       setIsLoading(false);
       return;
     }
@@ -292,17 +370,83 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
 
     (async () => {
       try {
-        const fromApi = await fetchMembersFromBotApi(launch.initData);
-        if (cancelled) return;
-        if (fromApi?.length) {
-          setMembers(fromApi);
-        } else if (sync.length) {
-          setMembers(sync);
-        } else {
-          setMembers([]);
+        let rosterMembers: TelegramGroupMember[] = [];
+        let nextMemberCount: number | null = null;
+        let nextUnseen: number | null = null;
+
+        if (canFetchRoster && billCtx) {
+          try {
+            const roster = await getGroupRosterByTelegramChatId(
+              apiBase,
+              billCtx.telegramChatId,
+            );
+            rosterMembers = roster.members.map((m) => ({
+              tgUserId: m.tgUserId,
+              name: m.name,
+              username: m.username,
+              photoUrl: m.photoUrl ?? undefined,
+            }));
+            nextMemberCount = roster.memberCount;
+            nextUnseen = roster.unseenCount;
+          } catch {
+            rosterMembers = [];
+          }
         }
+
+        let botMembers: TelegramGroupMember[] = [];
+        if (canFetchBot) {
+          try {
+            botMembers = (await fetchMembersFromBotApi(launch.initData)) ?? [];
+          } catch {
+            botMembers = [];
+          }
+        }
+
+        if (cancelled) return;
+
+        let merged = mergeMemberLists(rosterMembers, botMembers);
+        if (!merged.length && sync.length) {
+          merged = sync;
+        }
+
+        // Ensure current Mini App user appears (and keep cheap photo_url).
+        const u = launch.currentUser;
+        const selfName = displayNameFromLaunchUser(u);
+        if (u?.id != null && selfName) {
+          const existing = merged.find((m) => m.tgUserId === u.id);
+          if (existing) {
+            existing.photoUrl = existing.photoUrl ?? u.photo_url;
+            existing.username = existing.username ?? u.username ?? null;
+          } else {
+            merged = [
+              {
+                tgUserId: u.id,
+                name: selfName,
+                username: u.username ?? null,
+                photoUrl: u.photo_url,
+              },
+              ...merged,
+            ];
+          }
+        }
+
+        setMembers(merged);
+        setSeenCount(merged.length);
+        setMemberCount(nextMemberCount);
+        setUnseenCount(
+          nextUnseen != null
+            ? nextUnseen
+            : nextMemberCount != null
+              ? Math.max(0, nextMemberCount - merged.length)
+              : null,
+        );
       } catch {
-        if (!cancelled) setMembers(sync.length ? sync : []);
+        if (!cancelled) {
+          setMembers(sync.length ? sync : []);
+          setSeenCount(sync.length);
+          setMemberCount(null);
+          setUnseenCount(null);
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -311,9 +455,9 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
     return () => {
       cancelled = true;
     };
-  }, [launch.initData]);
+  }, [launch.initData, launch.currentUser?.id, launch.startParam, launch.chat?.id]);
 
-  return { members, isLoading };
+  return { members, isLoading, memberCount, seenCount, unseenCount };
 }
 
 /** @deprecated Prefer `useTelegramGroupMembers()` which returns `{ members, isLoading }`. */

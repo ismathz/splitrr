@@ -2,7 +2,12 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { randomUUID } from "node:crypto";
-import { createDb, BillSessionRepository, GroupRepository } from "@splitbot/db";
+import {
+  createDb,
+  BillSessionRepository,
+  GroupRepository,
+  GroupRosterRepository
+} from "@splitbot/db";
 import type { ParsedReceipt, ParsedReceiptAdjustment } from "@splitbot/shared";
 import { env } from "./env";
 import { StorageService } from "./storage";
@@ -17,9 +22,11 @@ import {
   formatBillAnnounceMessage,
   type BillAnnounceRow
 } from "./announce";
+import { authorizeRosterChatAccess } from "./roster";
 
 const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
+const roster = new GroupRosterRepository(db);
 const sessions = new BillSessionRepository(db);
 const storage = new StorageService({
   endpoint: env.S3_ENDPOINT,
@@ -881,6 +888,60 @@ app.get("/api/groups/by-telegram-chat/:telegramChatId/history", (c) => {
     .all(group.id, Number.isFinite(createdByUserId) ? createdByUserId : null);
 
   return c.json({ bills: rows });
+});
+
+/**
+ * Stored group roster for Mini App add-members (pick from list).
+ * Built from bot-visible users + Mini App openers; not a full Telegram member list.
+ * Opening this endpoint upserts the authenticated initData user into the roster.
+ */
+app.get("/api/groups/by-telegram-chat/:telegramChatId/roster", (c) => {
+  const telegramChatId = c.req.param("telegramChatId")?.trim();
+  if (!telegramChatId) {
+    return c.json({ error: "missing_telegram_chat_id" }, 400);
+  }
+
+  const auth = authorizeRosterChatAccess({
+    initData: c.get("initData"),
+    telegramChatId
+  });
+  if (!auth.ok) {
+    return c.json({ error: auth.error }, auth.status);
+  }
+
+  const groupId = groups.upsertGroup(telegramChatId, "Group");
+  const authUser = c.get("telegramUser");
+  if (authUser?.id != null) {
+    roster.observeTelegramUser(groupId, {
+      id: authUser.id,
+      username: authUser.username,
+      first_name: authUser.first_name,
+      last_name: authUser.last_name,
+      photo_url: authUser.photo_url
+    });
+  }
+
+  const group = groups.findByTelegramChatId(telegramChatId);
+  const members = roster.listMembers(groupId);
+  const seenCount = members.length;
+  const memberCount =
+    group?.member_count != null && Number.isFinite(group.member_count)
+      ? group.member_count
+      : null;
+  const unseenCount =
+    memberCount != null ? Math.max(0, memberCount - seenCount) : null;
+
+  return c.json({
+    members: members.map((m) => ({
+      tgUserId: m.tgUserId,
+      name: m.name,
+      username: m.username,
+      photoUrl: m.photoUrl
+    })),
+    memberCount,
+    seenCount,
+    unseenCount
+  });
 });
 
 app.get("/api/bills/:billId/export.csv", (c) => {

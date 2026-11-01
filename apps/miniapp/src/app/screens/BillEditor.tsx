@@ -341,13 +341,28 @@ export function BillEditor(props: BillEditorProps) {
     props.mode.kind === "create" ? props.mode.receiptFile : undefined;
 
   const launchCtx = useTelegramLaunchContext();
-  const { members: groupMembers, isLoading: groupMembersLoading } =
-    useTelegramGroupMembers();
+  const {
+    members: groupMembers,
+    isLoading: groupMembersLoading,
+    memberCount: groupMemberCount,
+    unseenCount: groupUnseenCount,
+  } = useTelegramGroupMembers();
 
   const groupMemberNames = useMemo(
     () => groupMembers.map((m) => m.name),
     [groupMembers],
   );
+
+  const currentUserDisplayName = useMemo(() => {
+    const u = launchCtx.currentUser;
+    if (!u) return null;
+    const first = u.first_name?.trim() ?? "";
+    const last = u.last_name?.trim() ?? "";
+    const full = `${first} ${last}`.trim();
+    if (full) return full;
+    if (u.username?.trim()) return u.username.trim();
+    return String(u.id);
+  }, [launchCtx.currentUser]);
 
   const memberByName = useMemo(
     () => new Map(groupMembers.map((m) => [m.name, m] as const)),
@@ -669,9 +684,25 @@ export function BillEditor(props: BillEditorProps) {
     didApplyAutofillRef.current = true;
     if (isEditMode) return;
     if (!allowAutofillFromGroupContext) return;
-    if (!groupMembers.length) return;
-    if (groupMembers.length <= AUTO_FILL_MAX_GROUP_SIZE) {
+
+    // Always pre-select the current Mini App user when present in the roster.
+    // Small groups: include everyone. Larger: roster checkboxes, you by default.
+    if (groupMembers.length > 0 && groupMembers.length <= AUTO_FILL_MAX_GROUP_SIZE) {
       setBillMembers(groupMemberNames);
+      return;
+    }
+
+    const selfName =
+      (launchCtx.currentUser?.id != null
+        ? groupMembers.find((m) => m.tgUserId === launchCtx.currentUser?.id)?.name
+        : null) ??
+      (currentUserDisplayName &&
+      isNameInGroup(currentUserDisplayName, groupMemberNames)
+        ? canonicalMemberName(currentUserDisplayName, groupMemberNames)
+        : currentUserDisplayName);
+
+    if (selfName?.trim()) {
+      setBillMembers([selfName.trim()]);
     }
   }, [
     groupMembers,
@@ -679,6 +710,8 @@ export function BillEditor(props: BillEditorProps) {
     allowAutofillFromGroupContext,
     groupMemberNames,
     isEditMode,
+    launchCtx.currentUser?.id,
+    currentUserDisplayName,
   ]);
 
   useEffect(() => {
@@ -1139,11 +1172,13 @@ export function BillEditor(props: BillEditorProps) {
     </CardDescription>
   ) : (
     <CardDescription>
-      {groupMembers.length > AUTO_FILL_MAX_GROUP_SIZE
-        ? `This group has ${groupMembers.length} members — choose who's in this bill.`
-        : groupMembers.length > 0
-          ? "Assign each line item to people in this bill."
-          : "Tap Add members to add people by name, or open from a Telegram group to load the roster."}
+      {groupMembers.length > 0
+        ? groupMembers.length > AUTO_FILL_MAX_GROUP_SIZE
+          ? `Seen ${groupMembers.length}${
+              groupMemberCount != null ? ` of ${groupMemberCount}` : ""
+            } group members — choose who's in this bill.`
+          : "Assign each line item to people in this bill."
+        : "Tap Add members to pick from the group roster, or add someone by name."}
     </CardDescription>
   );
 
@@ -2237,7 +2272,12 @@ export function BillEditor(props: BillEditorProps) {
               {groupMembers.length <= AUTO_FILL_MAX_GROUP_SIZE &&
               groupMembers.length > 0
                 ? "Small groups include everyone by default. Toggle people who aren't splitting, or add someone by name."
-                : "Choose who can be assigned to line items. Add names that aren't in the group list, or use the filter to find people quickly."}
+                : "Choose who can be assigned to line items. You're selected by default — add missing people by name if they aren't in the roster yet."}
+              {groupUnseenCount != null && groupUnseenCount > 0
+                ? ` About ${groupUnseenCount} group member${
+                    groupUnseenCount === 1 ? "" : "s"
+                  } not seen by the bot yet.`
+                : null}
             </DrawerDescription>
           </DrawerHeader>
           <div className="space-y-3 px-4 pb-2">
@@ -2340,8 +2380,9 @@ export function BillEditor(props: BillEditorProps) {
               </div>
               {groupMembers.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No synced Telegram list. You can still add people by name
-                  above.
+                  No roster yet. Run /split in the group (admins are backfilled),
+                  or add people by name above. The bot only learns members it can
+                  see.
                   {import.meta.env.DEV ? (
                     <>
                       {" "}

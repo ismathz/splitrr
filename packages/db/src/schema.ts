@@ -148,3 +148,9 @@ CREATE TABLE IF NOT EXISTS bill_member_payment_status (
 CREATE INDEX IF NOT EXISTS idx_member_payment_status_bill
   ON bill_member_payment_status(bill_session_id);
 `;
+
+/** Per-group Telegram roster: cached member_count + optional WebApp photo_url. */
+export const v5GroupRoster = `
+ALTER TABLE groups ADD COLUMN member_count INTEGER;
+ALTER TABLE users ADD COLUMN photo_url TEXT;
+`;

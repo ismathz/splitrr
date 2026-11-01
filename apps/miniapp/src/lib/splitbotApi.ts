@@ -176,6 +176,34 @@ export type ApiBillPaymentStatusMember = {
   paid: boolean;
 };
 
+export type ApiGroupRosterMember = {
+  tgUserId: number;
+  name: string;
+  username: string | null;
+  photoUrl: string | null;
+};
+
+export type ApiGroupRoster = {
+  members: ApiGroupRosterMember[];
+  memberCount: number | null;
+  seenCount: number;
+  unseenCount: number | null;
+};
+
+/** Stored bot-visible roster for a Telegram group (initData auth). */
+export async function getGroupRosterByTelegramChatId(
+  base: string,
+  telegramChatId: string,
+): Promise<ApiGroupRoster> {
+  const url = `${base}/api/groups/by-telegram-chat/${encodeURIComponent(telegramChatId)}/roster`;
+  const res = await apiFetch(url);
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(t || `get group roster failed: ${res.status}`);
+  }
+  return res.json() as Promise<ApiGroupRoster>;
+}
+
 export async function getGroupHistoryByTelegramChatId(
   base: string,
   telegramChatId: string,
