@@ -291,12 +291,55 @@ app.get("/api/pipeline/last-failures", (c) =>
   })
 );
 
+/**
+ * Mini App / Telegram send Telegram numeric user ids. `bill_sessions.created_by_user_id`
+ * FKs to internal `users.id` — upsert the Telegram profile and return that PK.
+ */
+function resolveCreatorInternalUserId(input: {
+  telegramUserId: number | undefined | null;
+  authUser: {
+    id: number;
+    username?: string;
+    first_name?: string;
+    last_name?: string;
+    photo_url?: string;
+  } | null;
+  groupId?: number;
+}): number | null {
+  const tgId = input.telegramUserId ?? input.authUser?.id;
+  if (tgId == null || !Number.isFinite(Number(tgId))) return null;
+  const auth = input.authUser;
+  const sameAsAuth = auth != null && Number(auth.id) === Number(tgId);
+  const internalId = roster.upsertUser({
+    telegramUserId: String(tgId),
+    username: sameAsAuth ? auth?.username ?? null : null,
+    firstName: sameAsAuth ? auth?.first_name ?? null : null,
+    lastName: sameAsAuth ? auth?.last_name ?? null : null,
+    photoUrl: sameAsAuth ? auth?.photo_url : undefined
+  });
+  if (input.groupId != null) {
+    roster.addMember(input.groupId, internalId);
+  }
+  return internalId;
+}
+
+function resolveInternalUserIdFromTelegram(
+  telegramUserId: number | null
+): number | null {
+  if (telegramUserId == null || !Number.isFinite(telegramUserId)) return null;
+  const row = db
+    .query("SELECT id FROM users WHERE telegram_user_id = ?1")
+    .get(String(telegramUserId)) as { id: number } | null;
+  return row?.id ?? null;
+}
+
 app.post("/api/bills", async (c) => {
   try {
     const body = await c.req.json<{
       telegramChatId: string;
       groupTitle: string;
       title: string;
+      /** Telegram user id (not internal users.id). */
       createdByUserId?: number;
       /** ISO date YYYY-MM-DD */
       billDate?: string;
@@ -316,18 +359,25 @@ app.post("/api/bills", async (c) => {
     }
 
     const groupId = groups.upsertGroup(
-      body.telegramChatId,
+      body.telegramChatId.trim(),
       body.groupTitle?.trim() || "Group"
     );
     const billId = randomUUID();
     const authUser = c.get("telegramUser");
 
+    // Must upsert into users first: created_by_user_id FK → users(id), not telegram id.
+    const createdByInternalId = resolveCreatorInternalUserId({
+      telegramUserId: body.createdByUserId,
+      authUser,
+      groupId
+    });
+
     sessions.create({
       id: billId,
       groupId,
-      title: body.title,
+      title: body.title.trim(),
       status: "draft",
-      createdByUserId: body.createdByUserId ?? authUser?.id,
+      createdByUserId: createdByInternalId ?? undefined,
       billDate: body.billDate,
       place: body.place ?? null,
       currency: body.currency
@@ -335,18 +385,25 @@ app.post("/api/bills", async (c) => {
 
     return c.json({ billId, groupId });
   } catch (err) {
+    const anyErr = err as { code?: string; message?: string; name?: string };
     console.error("[create-bill]", err);
+    const sqliteCode = anyErr?.code || anyErr?.name || "create_bill_failed";
     recordPipelineFailure({
       stage: "create_bill",
       path: c.req.path,
-      code: "create_bill_failed",
-      message: "Could not create the bill session.",
+      code:
+        /FOREIGN|CONSTRAINT/i.test(`${sqliteCode} ${anyErr?.message ?? ""}`)
+          ? "create_bill_fk"
+          : "create_bill_failed",
+      message: anyErr?.message?.slice(0, 180) || "Could not create the bill session.",
       httpStatus: 500
     });
     return c.json(
       {
         error: "Could not create the bill session. Try again.",
-        code: "create_bill_failed"
+        code: /FOREIGN|CONSTRAINT/i.test(`${sqliteCode} ${anyErr?.message ?? ""}`)
+          ? "create_bill_fk"
+          : "create_bill_failed"
       },
       500
     );
@@ -1146,10 +1203,14 @@ app.post("/api/bills/:billId/payment-status", async (c) => {
 
 app.get("/api/groups/:groupId/history", (c) => {
   const groupId = c.req.param("groupId");
-  const createdByUserIdRaw = c.req.query("createdByUserId");
-  const createdByUserId = createdByUserIdRaw
-    ? Number(createdByUserIdRaw)
+  // Query param is Telegram user id; column stores internal users.id.
+  const createdByTelegramRaw = c.req.query("createdByUserId");
+  const createdByTelegram = createdByTelegramRaw
+    ? Number(createdByTelegramRaw)
     : null;
+  const createdByInternal = resolveInternalUserIdFromTelegram(
+    Number.isFinite(createdByTelegram) ? createdByTelegram : null
+  );
   const rows = db
     .query(
       `SELECT id, title, status, currency, bill_date, place, created_at
@@ -1159,16 +1220,24 @@ app.get("/api/groups/:groupId/history", (c) => {
        ORDER BY created_at DESC
        LIMIT 100`
     )
-    .all(Number(groupId), Number.isFinite(createdByUserId) ? createdByUserId : null);
+    .all(
+      Number(groupId),
+      createdByTelegramRaw && createdByInternal == null
+        ? -1 // filter requested but user unknown → empty
+        : createdByInternal
+    );
   return c.json({ bills: rows });
 });
 
 app.get("/api/groups/by-telegram-chat/:telegramChatId/history", (c) => {
   const telegramChatId = c.req.param("telegramChatId");
-  const createdByUserIdRaw = c.req.query("createdByUserId");
-  const createdByUserId = createdByUserIdRaw
-    ? Number(createdByUserIdRaw)
+  const createdByTelegramRaw = c.req.query("createdByUserId");
+  const createdByTelegram = createdByTelegramRaw
+    ? Number(createdByTelegramRaw)
     : null;
+  const createdByInternal = resolveInternalUserIdFromTelegram(
+    Number.isFinite(createdByTelegram) ? createdByTelegram : null
+  );
 
   const group = db
     .query("SELECT id FROM groups WHERE telegram_chat_id = ?1")
@@ -1187,7 +1256,10 @@ app.get("/api/groups/by-telegram-chat/:telegramChatId/history", (c) => {
        ORDER BY created_at DESC
        LIMIT 100`
     )
-    .all(group.id, Number.isFinite(createdByUserId) ? createdByUserId : null);
+    .all(
+      group.id,
+      createdByTelegramRaw && createdByInternal == null ? -1 : createdByInternal
+    );
 
   return c.json({ bills: rows });
 });
