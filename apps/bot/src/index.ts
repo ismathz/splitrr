@@ -75,7 +75,7 @@ function toPublicMembers(
 
 const DEEP_LINK_SETUP_HINT =
   "Group deep links need TELEGRAM_BOT_USERNAME and TELEGRAM_MINI_APP_SHORT_NAME " +
-  "(BotFather Mini App short name) on the bot host. Ask the admin to set them and restart the bot.";
+  "on the bot host. Ask the admin to set them and restart the bot.";
 
 bot.command("start", async (ctx) => {
   const chat = ctx.chat;
@@ -135,7 +135,7 @@ bot.command("split", async (ctx) => {
     }
 
     await ctx.reply(
-      "Open Splitrr to create or continue a bill for this chat. Tip: for a fuller member list, disable BotFather /setprivacy or make the bot a group admin, then re-run /split.",
+      "Open Splitrr to create or continue a bill for this chat.",
       {
         reply_markup: buildOpenMiniAppReplyMarkup({
           chatType: chat.type,

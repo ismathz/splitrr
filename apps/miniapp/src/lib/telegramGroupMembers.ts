@@ -355,7 +355,7 @@ export type UseTelegramGroupMembersResult = {
   /** max(0, memberCount - seenCount) when memberCount is known. */
   unseenCount: number | null;
   status: RosterLoadStatus;
-  /** Short reason for empty/error UI (privacy, auth, missing cid, …). */
+  /** Short reason for empty/error UI (auth, missing cid, …). */
   statusMessage: string | null;
 };
 
@@ -426,7 +426,7 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
       } else {
         setStatus("empty");
         setStatusMessage(
-          "No members yet. Run /split in the group. For a fuller list: BotFather → /setprivacy → Disable, or make @SplitrrBot a group admin, then re-run /split.",
+          "No members yet. Run /split in the group. You can still add people by name.",
         );
       }
       return;
@@ -462,7 +462,7 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
             if (!rosterMembers.length) {
               rosterStatus = "empty";
               rosterMessage =
-                "No members yet. Run /split in the group. If the list stays empty: BotFather → /setprivacy → Disable, or make @SplitrrBot a group admin so it can see ordinary messages.";
+                "No members yet. Run /split in the group. You can still add people by name.";
             }
           } catch (err) {
             rosterMembers = [];
@@ -515,7 +515,7 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
           setStatus("ok");
           setStatusMessage(
             nextMemberCount != null && merged.length < nextMemberCount
-              ? `Showing ${merged.length} of ${nextMemberCount} people the bot has seen. Telegram does not give bots a full member list — add missing people by name, or BotFather → /setprivacy → Disable / make @SplitrrBot a group admin so more appear over time.`
+              ? `Showing ${merged.length} of ${nextMemberCount} people. Add anyone missing by name.`
               : null,
           );
         } else if (rosterStatus) {
@@ -524,7 +524,7 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
         } else {
           setStatus("empty");
           setStatusMessage(
-            "No members yet. Run /split in the group. For a fuller list: BotFather → /setprivacy → Disable, or make @SplitrrBot a group admin.",
+            "No members yet. Run /split in the group. You can still add people by name.",
           );
         }
       } catch (err) {
