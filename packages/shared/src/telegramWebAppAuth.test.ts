@@ -224,13 +224,17 @@ describe("parse helpers", () => {
       bid: "bill-webview"
     });
     const original = globalThis.Buffer;
-    // @ts-expect-error intentional: simulate browser bundle without Buffer
-    delete (globalThis as { Buffer?: unknown }).Buffer;
+    // Simulate browser bundle: Vite does not polyfill Buffer.
+    Reflect.deleteProperty(globalThis, "Buffer");
     try {
       expect(parseBillIdFromStartParam(encoded)).toBe("bill-webview");
       expect(parseChatIdFromStartParam(encoded)).toBe("-1001");
     } finally {
-      (globalThis as { Buffer?: typeof original }).Buffer = original;
+      Object.defineProperty(globalThis, "Buffer", {
+        value: original,
+        configurable: true,
+        writable: true
+      });
     }
   });
 
