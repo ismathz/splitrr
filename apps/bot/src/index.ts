@@ -79,14 +79,14 @@ bot.command("start", async (ctx) => {
   });
 
   await ctx.reply(
-    "Splitbot is ready. Use /split in a group (or here in DM) to open the Mini App, then scan a receipt or start an empty bill.",
+    "Splitrr is ready. Use /split in a group (or here in DM) to open the Mini App, then scan a receipt or start an empty bill.",
     replyMarkup ? { reply_markup: replyMarkup } : undefined
   );
 });
 
 bot.command("help", async (ctx) => {
   await ctx.reply(
-    "Commands:\n/split - open Splitbot Mini App\n/history - latest bills\n/help - this message"
+    "Commands:\n/split - open Splitrr Mini App\n/history - latest bills\n/help - this message"
   );
 });
 
@@ -118,13 +118,13 @@ bot.command("split", async (ctx) => {
 
     if (!hasDirectMiniAppLinkConfig() || !direct) {
       await ctx.reply(
-        `Cannot open Splitbot in this group yet.\n${DEEP_LINK_SETUP_HINT}`
+        `Cannot open Splitrr in this group yet.\n${DEEP_LINK_SETUP_HINT}`
       );
       return;
     }
 
     await ctx.reply(
-      "Open Splitbot to create or continue a bill for this chat.",
+      "Open Splitrr to create or continue a bill for this chat.",
       {
         reply_markup: buildOpenMiniAppReplyMarkup({
           chatType: chat.type,
@@ -138,7 +138,7 @@ bot.command("split", async (ctx) => {
 
   // Private / DM: web_app button (Telegram allows this only in private chats).
   if (chat.type === "private") {
-    await ctx.reply("Open Splitbot to create or continue a bill.", {
+    await ctx.reply("Open Splitrr to create or continue a bill.", {
       reply_markup: buildOpenMiniAppReplyMarkup({
         chatType: "private",
         miniUrl,
@@ -211,7 +211,7 @@ bot.on("message:photo", async (ctx) => {
     .get(String(chat.id)) as { id: number } | null;
 
   if (!group) {
-    await ctx.reply("Use /split to open Splitbot, then scan or upload the receipt there.");
+    await ctx.reply("Use /split to open Splitrr, then scan or upload the receipt there.");
     return;
   }
 
@@ -236,8 +236,8 @@ bot.on("message:photo", async (ctx) => {
     const setupMissing = (chat.type === "group" || chat.type === "supergroup") && !direct;
     await ctx.reply(
       setupMissing
-        ? `Got your photo. Open Splitbot with /split to scan it (group photos are not auto-OCR’d yet).\n${DEEP_LINK_SETUP_HINT}`
-        : "Got your photo. Open Splitbot to scan or upload the receipt (group photos are not auto-OCR’d yet).",
+        ? `Got your photo. Open Splitrr with /split to scan it (group photos are not auto-OCR’d yet).\n${DEEP_LINK_SETUP_HINT}`
+        : "Got your photo. Open Splitrr to scan or upload the receipt (group photos are not auto-OCR’d yet).",
       replyMarkup ? { reply_markup: replyMarkup } : undefined
     );
     return;
@@ -245,13 +245,13 @@ bot.on("message:photo", async (ctx) => {
 
   if ((chat.type === "group" || chat.type === "supergroup") && !direct) {
     await ctx.reply(
-      `Got your photo for bill ${latest.id}. Open Splitbot with /split to upload/scan the receipt (group photos are not auto-OCR’d yet).\n${DEEP_LINK_SETUP_HINT}`
+      `Got your photo for bill ${latest.id}. Open Splitrr with /split to upload/scan the receipt (group photos are not auto-OCR’d yet).\n${DEEP_LINK_SETUP_HINT}`
     );
     return;
   }
 
   await ctx.reply(
-    `Got your photo for bill ${latest.id}. Open Splitbot to upload/scan the receipt (group photos are not auto-OCR’d yet).`,
+    `Got your photo for bill ${latest.id}. Open Splitrr to upload/scan the receipt (group photos are not auto-OCR’d yet).`,
     replyMarkup ? { reply_markup: replyMarkup } : undefined
   );
 });

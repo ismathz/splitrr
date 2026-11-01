@@ -1,4 +1,4 @@
-# Splitbot
+# Splitrr
 
 Telegram Bill Splitter built with Bun + TypeScript.
 

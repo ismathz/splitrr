@@ -12,7 +12,7 @@ describe("buildOpenMiniAppReplyMarkup", () => {
       inline_keyboard: [
         [
           {
-            text: "Open Splitbot",
+            text: "Open Splitrr",
             web_app: {
               url: "https://splitrr.ismath.dev/?tgWebAppStartParam=abc"
             }
@@ -32,7 +32,7 @@ describe("buildOpenMiniAppReplyMarkup", () => {
       inline_keyboard: [
         [
           {
-            text: "Open Splitbot",
+            text: "Open Splitrr",
             url: "https://t.me/SplitrrBot/app?startapp=abc"
           }
         ]

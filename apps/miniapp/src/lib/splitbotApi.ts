@@ -173,7 +173,7 @@ export async function uploadReceipt(
       JSON.stringify({
         error: "missing_init_data",
         message:
-          "Telegram login data is missing. Close Splitbot and re-open it from /split, then try again.",
+          "Telegram login data is missing. Close Splitrr and re-open it from /split, then try again.",
       }),
     );
   }

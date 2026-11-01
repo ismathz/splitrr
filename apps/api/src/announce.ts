@@ -111,7 +111,7 @@ export function formatBillAnnounceMessage(
       : null;
 
   const lines = [
-    `Splitbot · ${escapeHtml(bill.title)}`,
+    `Splitrr · ${escapeHtml(bill.title)}`,
     bill.place ? `Place: ${escapeHtml(bill.place)}` : null,
     `Date: ${formatAnnounceBillDate(bill.billDate)}`,
     peopleLine,
