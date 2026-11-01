@@ -480,6 +480,18 @@ export function BillEditor(props: BillEditorProps) {
       );
       return;
     }
+    // Wait for Telegram.WebApp.initData — uploading without it yields missing/invalid_init_data.
+    if (!launchCtx.initData?.trim()) {
+      setOcrPhase("uploading");
+      setOcrError(null);
+      const waitId = window.setTimeout(() => {
+        setOcrPhase("error");
+        setOcrError(
+          "Telegram login data is missing. Close Splitbot and re-open it from /split, then try again.",
+        );
+      }, 3000);
+      return () => window.clearTimeout(waitId);
+    }
 
     let cancelled = false;
     setOcrPhase("uploading");
@@ -544,6 +556,7 @@ export function BillEditor(props: BillEditorProps) {
     splitbotApiBase,
     billApiContext,
     launchCtx.currentUser?.id,
+    launchCtx.initData,
   ]);
 
   const [isAddingManualItem, setIsAddingManualItem] = useState(false);

@@ -1,47 +1,90 @@
 import type { Context, Next } from "hono";
 import {
   parseTelegramUserFromInitData,
-  validateWebAppInitData,
+  validateWebAppInitDataDetailed,
   type TelegramWebAppUser
 } from "@splitbot/shared";
 import { env } from "./env";
+import {
+  asInitDataString,
+  readInitDataFromHeaders,
+  readInitDataFromQuery
+} from "./authInitData";
 
 export type ApiAuthVariables = {
   telegramUser: TelegramWebAppUser | null;
   initData: string | null;
   authMode: "init_data" | "dev_bypass" | "cron";
+  /** Multipart body parsed during auth so routes can reuse it. */
+  parsedMultipart: Record<string, string | File> | null;
 };
 
 declare module "hono" {
   interface ContextVariableMap extends ApiAuthVariables {}
 }
 
-const INIT_DATA_HEADER = "x-telegram-init-data";
-
-export function readInitData(c: Context): string | null {
-  const header = c.req.header(INIT_DATA_HEADER)?.trim();
-  if (header) return header;
-  const auth = c.req.header("Authorization");
-  if (auth?.toLowerCase().startsWith("tma ")) {
-    const value = auth.slice(4).trim();
-    return value || null;
-  }
-  return null;
-}
+export { readInitDataFromHeaders, readInitDataFromQuery } from "./authInitData";
 
 /**
  * Require valid Telegram WebApp initData on `/api/*` (except cron routes).
  * In development, `SPLITBOT_DEV_AUTH_BYPASS=true` allows unauthenticated local use.
+ *
+ * Accepts initData from (in order):
+ * 1. `Authorization: tma <initData>`
+ * 2. `X-Telegram-Init-Data`
+ * 3. Query `tgWebAppData` / `initData` (multipart-safe fallback)
+ * 4. Multipart field `initData` / `_telegram_init_data` (Telegram WebViews often
+ *    mangle custom headers on FormData uploads)
  */
 export async function requireTelegramAuth(c: Context, next: Next) {
   if (c.req.method === "OPTIONS") {
     return next();
   }
 
-  const initData = readInitData(c);
+  c.set("parsedMultipart", null);
+
+  let initData =
+    readInitDataFromHeaders(c) || readInitDataFromQuery(c) || null;
+
+  const contentType = c.req.header("content-type") ?? "";
+  if (
+    !initData &&
+    contentType.toLowerCase().includes("multipart/form-data")
+  ) {
+    try {
+      const parsed = await c.req.parseBody({ all: true });
+      const flat: Record<string, string | File> = {};
+      for (const [key, value] of Object.entries(parsed)) {
+        if (Array.isArray(value)) {
+          const first = value[0];
+          if (typeof first === "string" || first instanceof File) {
+            flat[key] = first;
+          }
+        } else if (typeof value === "string" || value instanceof File) {
+          flat[key] = value;
+        }
+      }
+      c.set("parsedMultipart", flat);
+      initData =
+        asInitDataString(flat.initData) ||
+        asInitDataString(flat._telegram_init_data) ||
+        null;
+    } catch (err) {
+      console.warn("[auth] multipart parse for initData failed", err);
+    }
+  }
+
   if (initData && env.TELEGRAM_BOT_TOKEN) {
-    if (!validateWebAppInitData(initData, env.TELEGRAM_BOT_TOKEN)) {
-      return c.json({ error: "invalid_init_data" }, 401);
+    const result = validateWebAppInitDataDetailed(
+      initData,
+      env.TELEGRAM_BOT_TOKEN
+    );
+    if (!result.ok) {
+      console.warn("[auth] invalid_init_data", result.reason);
+      return c.json(
+        { error: "invalid_init_data", reason: result.reason },
+        401
+      );
     }
     const user = parseTelegramUserFromInitData(initData);
     c.set("telegramUser", user);
@@ -75,5 +118,6 @@ export async function requireCronSecret(c: Context, next: Next) {
   c.set("authMode", "cron");
   c.set("telegramUser", null);
   c.set("initData", null);
+  c.set("parsedMultipart", null);
   return next();
 }

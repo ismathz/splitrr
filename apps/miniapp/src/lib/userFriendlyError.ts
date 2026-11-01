@@ -47,6 +47,10 @@ export function toUserFriendlyErrorMessage(
     const parsed: unknown = JSON.parse(trimmed);
     if (parsed && typeof parsed === "object") {
       const o = parsed as Record<string, unknown>;
+      if (typeof o.error === "string") {
+        const authMsg = authErrorMessage(o.error, o.reason);
+        if (authMsg) return authMsg;
+      }
       if (typeof o.message === "string" && o.message.trim()) {
         return sanitizeApiMessage(o.message.trim()) ?? fallback;
       }
@@ -56,6 +60,14 @@ export function toUserFriendlyErrorMessage(
     }
   } catch {
     // not JSON
+  }
+
+  if (lower.includes("invalid_init_data") || lower.includes("missing_init_data")) {
+    return (
+      authErrorMessage(
+        lower.includes("missing") ? "missing_init_data" : "invalid_init_data",
+      ) ?? fallback
+    );
   }
 
   if (/^create bill failed:\s*\d+/i.test(trimmed)) {
@@ -81,4 +93,22 @@ function sanitizeApiMessage(s: string): string | null {
   if (t.length > 280) return null;
   if (/^[A-Z][a-zA-Z0-9]*Error$/.test(t)) return null;
   return t;
+}
+
+function authErrorMessage(
+  error: string,
+  reason?: unknown,
+): string | null {
+  const code = error.trim().toLowerCase();
+  if (code === "missing_init_data") {
+    return "Telegram login data is missing. Close Splitbot and re-open it from /split, then try again.";
+  }
+  if (code === "invalid_init_data") {
+    const why =
+      typeof reason === "string" && reason.trim()
+        ? ` (${reason.trim()})`
+        : "";
+    return `Telegram login expired or invalid${why}. Close Splitbot and re-open it from /split, then try again.`;
+  }
+  return null;
 }

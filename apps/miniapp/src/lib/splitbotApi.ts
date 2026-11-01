@@ -13,7 +13,29 @@ export function getSplitbotApiBase(): string {
   return "";
 }
 
-/** Latest Telegram.WebApp.initData for API auth (empty outside Telegram). */
+/** Read `tgWebAppData` from query or hash (Telegram launch param). */
+function readTgWebAppDataFromUrl(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const url = new URL(window.location.href);
+    const fromQuery = url.searchParams.get("tgWebAppData")?.trim();
+    if (fromQuery) return fromQuery;
+    const hashRaw = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
+    if (hashRaw) {
+      const hashParams = new URLSearchParams(hashRaw);
+      const fromHash = hashParams.get("tgWebAppData")?.trim();
+      if (fromHash) return fromHash;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+/**
+ * Latest Telegram WebApp initData for API auth (empty outside Telegram).
+ * Prefers `Telegram.WebApp.initData`, then URL `tgWebAppData` (query/hash).
+ */
 export function getTelegramInitData(): string {
   try {
     const wa = (
@@ -21,7 +43,9 @@ export function getTelegramInitData(): string {
         Telegram?: { WebApp?: { initData?: string } };
       }
     ).Telegram?.WebApp;
-    return wa?.initData?.trim() ?? "";
+    const fromWa = wa?.initData?.trim() ?? "";
+    if (fromWa) return fromWa;
+    return readTgWebAppDataFromUrl();
   } catch {
     return "";
   }
@@ -31,6 +55,8 @@ function authHeaders(extra?: HeadersInit): Headers {
   const headers = new Headers(extra);
   const initData = getTelegramInitData();
   if (initData) {
+    // Prefer the standard TMA Authorization scheme; keep the custom header too.
+    headers.set("Authorization", `tma ${initData}`);
     headers.set("X-Telegram-Init-Data", initData);
   }
   return headers;
@@ -42,6 +68,14 @@ async function apiFetch(
 ): Promise<Response> {
   const headers = authHeaders(init?.headers);
   return fetch(input, { ...init, headers });
+}
+
+/** Append initData as a multipart field (WebViews often drop custom headers on FormData). */
+function appendInitDataToFormData(fd: FormData): void {
+  const initData = getTelegramInitData();
+  if (!initData) return;
+  fd.append("initData", initData);
+  fd.append("_telegram_init_data", initData);
 }
 
 export function resolveBillContextForApi(
@@ -127,12 +161,28 @@ export async function uploadReceipt(
   billId: string,
   file: File,
 ): Promise<{ key: string; signedUrl: string }> {
+  const initData = getTelegramInitData();
+  if (!initData) {
+    throw new Error(
+      JSON.stringify({
+        error: "missing_init_data",
+        message:
+          "Telegram login data is missing. Close Splitbot and re-open it from /split, then try again.",
+      }),
+    );
+  }
   const fd = new FormData();
   fd.append("file", file);
-  const res = await apiFetch(`${base}/api/bills/${billId}/receipt`, {
-    method: "POST",
-    body: fd,
-  });
+  appendInitDataToFormData(fd);
+  // Also pass initData on the query string — most resilient for Telegram WebViews.
+  const qs = new URLSearchParams({ tgWebAppData: initData });
+  const res = await apiFetch(
+    `${base}/api/bills/${billId}/receipt?${qs.toString()}`,
+    {
+      method: "POST",
+      body: fd,
+    },
+  );
   if (!res.ok) {
     const t = await res.text();
     throw new Error(t || `upload receipt failed: ${res.status}`);

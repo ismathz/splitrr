@@ -186,8 +186,18 @@ app.post("/api/bills/:billId/receipt", async (c) => {
   }
 
   const billId = c.req.param("billId");
-  const formData = await c.req.formData();
-  const file = formData.get("file");
+  // Auth middleware may have already parsed multipart to read initData.
+  const cached = c.get("parsedMultipart");
+  let file: unknown = cached?.file ?? null;
+  if (!(file instanceof File)) {
+    try {
+      const formData = await c.req.formData();
+      file = formData.get("file");
+    } catch (err) {
+      console.warn("[api] receipt formData read failed", err);
+      file = null;
+    }
+  }
 
   if (!(file instanceof File)) {
     return c.json({ error: "file is required" }, 400);
