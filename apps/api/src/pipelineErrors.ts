@@ -37,6 +37,7 @@ export function classifyOpenAiError(err: unknown): {
   openaiCode?: string;
 } {
   const anyErr = err as {
+    name?: string;
     status?: number;
     code?: string;
     type?: string;
@@ -76,12 +77,34 @@ export function classifyOpenAiError(err: unknown): {
       openaiCode
     };
   }
-  if (/invalid_image|image_url|download|fetch.*image|unsupported.*image/i.test(raw)) {
+  if (
+    /invalid_image|image_url|timeout while downloading|download|fetch.*image|unsupported.*image/i.test(
+      `${openaiCode} ${raw}`
+    )
+  ) {
     return {
       code: "openai_image_unreadable",
       message:
-        "OpenAI could not read the receipt image. Try JPEG/PNG, or check that R2 signed URLs are reachable.",
+        "OpenAI could not read the receipt image. Re-upload as JPEG/PNG (not HEIC), or try again.",
       status: 422,
+      openaiStatus,
+      openaiCode
+    };
+  }
+  if (/openai_empty_output|openai_bad_json/i.test(`${openaiCode} ${raw}`)) {
+    return {
+      code: "openai_bad_output",
+      message: "OpenAI returned an unusable OCR result. Try a clearer photo.",
+      status: 502,
+      openaiStatus,
+      openaiCode
+    };
+  }
+  if (/ZodError|invalid_type|too_small/i.test(`${anyErr?.name ?? ""} ${raw}`)) {
+    return {
+      code: "ocr_schema_mismatch",
+      message: "OCR result did not match the expected format. Try again or add items manually.",
+      status: 502,
       openaiStatus,
       openaiCode
     };

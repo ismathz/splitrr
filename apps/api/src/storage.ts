@@ -78,6 +78,28 @@ export class StorageService {
     );
   }
 
+  /** Fetch object bytes from R2/S3 (for OCR base64 — OpenAI often cannot fetch R2 signed URLs). */
+  async getObjectBytes(key: string): Promise<{
+    bytes: Uint8Array;
+    contentType: string;
+  }> {
+    const res = await this.client.send(
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key
+      })
+    );
+    const body = res.Body;
+    if (!body) {
+      throw new Error("storage_empty_object");
+    }
+    const bytes = new Uint8Array(await body.transformToByteArray());
+    const contentType =
+      (res.ContentType || "application/octet-stream").toLowerCase().trim() ||
+      "application/octet-stream";
+    return { bytes, contentType };
+  }
+
   /** True when `key` is under this service's configured prefix (rejects arbitrary URLs/keys). */
   isOwnedKey(key: string): boolean {
     const normalized = key.replace(/^\/+/, "");
