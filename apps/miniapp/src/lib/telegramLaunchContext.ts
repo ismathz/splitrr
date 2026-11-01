@@ -1,4 +1,9 @@
 import { useEffect, useState } from "react";
+import {
+  parseChatIdFromStartParam,
+  parseTelegramChatIdFromInitData,
+  parseTelegramUserFromInitData,
+} from "@splitbot/shared";
 
 /**
  * Telegram Mini App launch context from `Telegram.WebApp.initDataUnsafe` and URL params.
@@ -49,7 +54,7 @@ export interface TelegramLaunchContext {
   /** Raw query string from `Telegram.WebApp.initData` (for server validation). */
   initData: string;
   initDataUnsafe: TelegramInitDataUnsafe | null;
-  /** From `initDataUnsafe` or URL `tgWebAppStartParam`. */
+  /** From `initDataUnsafe`, raw initData, or URL `tgWebAppStartParam` (query or hash). */
   startParam: string | undefined;
   chatType: TelegramWebAppChatType | undefined;
   chatInstance: string | undefined;
@@ -80,18 +85,48 @@ function getTelegramWebApp(): {
 }
 
 /**
- * Reads `tgWebAppStartParam` from the page URL (Telegram may set this before initData is ready).
+ * Reads `tgWebAppStartParam` from the page URL.
+ * Telegram may put it in the query string and/or the hash fragment.
  */
 export function readTgWebAppStartParamFromUrl(): string | undefined {
   if (typeof window === "undefined") return undefined;
   try {
     const url = new URL(window.location.href);
-    const q = url.searchParams.get("tgWebAppStartParam");
+    const q = url.searchParams.get("tgWebAppStartParam")?.trim();
     if (q) return q;
+
+    const hashRaw = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
+    if (hashRaw) {
+      // Hash may be `tgWebAppStartParam=…&…` or nested under other params.
+      const hashParams = new URLSearchParams(hashRaw);
+      const fromHash = hashParams.get("tgWebAppStartParam")?.trim();
+      if (fromHash) return fromHash;
+    }
   } catch {
     /* ignore */
   }
   return undefined;
+}
+
+function readStartParamFromInitData(initData: string): string | undefined {
+  if (!initData.trim()) return undefined;
+  try {
+    return new URLSearchParams(initData).get("start_param")?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readUserFromInitData(initData: string): TelegramWebAppUser | undefined {
+  const parsed = parseTelegramUserFromInitData(initData);
+  if (!parsed?.id) return undefined;
+  return {
+    id: parsed.id,
+    first_name: parsed.first_name ?? "",
+    last_name: parsed.last_name,
+    username: parsed.username,
+    photo_url: parsed.photo_url,
+  };
 }
 
 /**
@@ -112,19 +147,42 @@ export function logTelegramInitDataOnce(): void {
     initDataLength: wa?.initData?.length ?? 0,
     initDataUnsafe: wa?.initDataUnsafe ?? null,
     tgWebAppStartParam: readTgWebAppStartParamFromUrl(),
+    resolvedStartParam: getEffectiveStartParam(),
+    resolvedChatId: resolveLaunchTelegramChatId(readTelegramLaunchContext()),
   };
   console.info("[splitbot] Telegram.WebApp init snapshot", payload);
 }
 
 /**
- * Effective `start_param`: URL wins if both exist (Telegram often mirrors to both).
+ * Effective `start_param`: URL (query/hash) → initDataUnsafe → raw initData.
  */
 export function getEffectiveStartParam(): string | undefined {
   const wa = getTelegramWebApp();
   wa?.ready?.();
   const fromUrl = readTgWebAppStartParamFromUrl();
+  if (fromUrl) return fromUrl;
   const fromUnsafe = wa?.initDataUnsafe?.start_param?.trim();
-  return fromUrl ?? (fromUnsafe || undefined);
+  if (fromUnsafe) return fromUnsafe;
+  const initData = wa?.initData?.trim() ?? "";
+  return readStartParamFromInitData(initData);
+}
+
+/**
+ * Best-effort Telegram chat id for API calls: initData chat/`cid`, unsafe chat, then start_param.
+ */
+export function resolveLaunchTelegramChatId(
+  ctx: TelegramLaunchContext,
+): string | null {
+  if (ctx.chat?.id != null) return String(ctx.chat.id);
+  if (ctx.initData) {
+    const fromInit = parseTelegramChatIdFromInitData(ctx.initData);
+    if (fromInit) return fromInit;
+  }
+  if (ctx.startParam) {
+    const fromStart = parseChatIdFromStartParam(ctx.startParam);
+    if (fromStart) return fromStart;
+  }
+  return null;
 }
 
 export function readTelegramLaunchContext(): TelegramLaunchContext {
@@ -133,8 +191,21 @@ export function readTelegramLaunchContext(): TelegramLaunchContext {
 
   const initData = wa?.initData?.trim() ?? "";
   const unsafe = wa?.initDataUnsafe ?? null;
-  const startFromUrl = readTgWebAppStartParamFromUrl();
-  const startParam = startFromUrl ?? unsafe?.start_param?.trim() ?? undefined;
+  const startParam =
+    readTgWebAppStartParamFromUrl() ??
+    unsafe?.start_param?.trim() ??
+    readStartParamFromInitData(initData) ??
+    undefined;
+
+  const fromInitUser = initData ? readUserFromInitData(initData) : undefined;
+  const unsafeUser = unsafe?.user;
+  const currentUser: TelegramWebAppUser | undefined = unsafeUser
+    ? {
+        ...unsafeUser,
+        // Prefer cheap photo_url from whichever source provides it.
+        photo_url: unsafeUser.photo_url ?? fromInitUser?.photo_url,
+      }
+    : fromInitUser;
 
   return {
     initData,
@@ -144,7 +215,7 @@ export function readTelegramLaunchContext(): TelegramLaunchContext {
     chatInstance: unsafe?.chat_instance,
     chat: unsafe?.chat,
     receiver: unsafe?.receiver,
-    currentUser: unsafe?.user,
+    currentUser,
   };
 }
 
@@ -154,6 +225,11 @@ export function isGroupLikeLaunch(ctx: TelegramLaunchContext): boolean {
   if (t === "group" || t === "supergroup") return true;
   const ct = ctx.chat?.type;
   if (ct === "group" || ct === "supergroup") return true;
+  // Direct-link opens often omit `chat` but include a group `cid` in start_param.
+  if (resolveLaunchTelegramChatId(ctx) && t !== "private" && t !== "sender") {
+    const cid = resolveLaunchTelegramChatId(ctx);
+    if (cid && (cid.startsWith("-") || cid.length > 10)) return true;
+  }
   return false;
 }
 
@@ -178,8 +254,8 @@ export function useTelegramLaunchContext(): TelegramLaunchContext {
     wa?.ready?.();
     const refresh = () => setCtx(readTelegramLaunchContext());
     queueMicrotask(refresh);
-    // `initDataUnsafe.chat` can appear shortly after `ready()` on some clients.
-    const timeouts = [50, 150, 400, 1000].map((ms) =>
+    // `initDataUnsafe.chat` / start_param can appear shortly after `ready()` on some clients.
+    const timeouts = [50, 150, 400, 1000, 2000].map((ms) =>
       setTimeout(refresh, ms),
     );
     return () => timeouts.forEach(clearTimeout);

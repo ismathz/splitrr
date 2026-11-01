@@ -23,11 +23,17 @@ import {
   type BillAnnounceRow
 } from "./announce";
 import { authorizeRosterChatAccess } from "./roster";
+import { backfillRosterFromBotApi } from "./telegramRosterBackfill";
 
 const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
 const roster = new GroupRosterRepository(db);
 const sessions = new BillSessionRepository(db);
+
+/** Avoid hammering Telegram when many Mini App clients open the same group. */
+const rosterBackfillCooldownMs = 60_000;
+const rosterBackfillLastAt = new Map<string, number>();
+
 const storage = new StorageService({
   endpoint: env.S3_ENDPOINT,
   region: env.S3_REGION,
@@ -893,9 +899,10 @@ app.get("/api/groups/by-telegram-chat/:telegramChatId/history", (c) => {
 /**
  * Stored group roster for Mini App add-members (pick from list).
  * Built from bot-visible users + Mini App openers; not a full Telegram member list.
- * Opening this endpoint upserts the authenticated initData user into the roster.
+ * Opening this endpoint upserts the authenticated initData user into the roster
+ * and opportunistically backfills admins via Bot API when the roster is thin.
  */
-app.get("/api/groups/by-telegram-chat/:telegramChatId/roster", (c) => {
+app.get("/api/groups/by-telegram-chat/:telegramChatId/roster", async (c) => {
   const telegramChatId = c.req.param("telegramChatId")?.trim();
   if (!telegramChatId) {
     return c.json({ error: "missing_telegram_chat_id" }, 400);
@@ -921,8 +928,40 @@ app.get("/api/groups/by-telegram-chat/:telegramChatId/roster", (c) => {
     });
   }
 
-  const group = groups.findByTelegramChatId(telegramChatId);
-  const members = roster.listMembers(groupId);
+  let members = roster.listMembers(groupId);
+  let group = groups.findByTelegramChatId(telegramChatId);
+  let backfillError: string | undefined;
+  const forceRefresh = c.req.query("refresh") === "1";
+  const needsBackfill =
+    forceRefresh ||
+    members.length <= 1 ||
+    group?.member_count == null;
+
+  if (needsBackfill && env.TELEGRAM_BOT_TOKEN) {
+    const last = rosterBackfillLastAt.get(telegramChatId) ?? 0;
+    const due = forceRefresh || Date.now() - last >= rosterBackfillCooldownMs;
+    if (due) {
+      rosterBackfillLastAt.set(telegramChatId, Date.now());
+      const result = await backfillRosterFromBotApi({
+        botToken: env.TELEGRAM_BOT_TOKEN,
+        telegramChatId,
+        groupId,
+        groups,
+        roster
+      });
+      backfillError = result.error;
+      if (result.error) {
+        console.warn(
+          "[roster] bot API backfill",
+          telegramChatId,
+          result.error
+        );
+      }
+      members = roster.listMembers(groupId);
+      group = groups.findByTelegramChatId(telegramChatId);
+    }
+  }
+
   const seenCount = members.length;
   const memberCount =
     group?.member_count != null && Number.isFinite(group.member_count)
@@ -940,7 +979,8 @@ app.get("/api/groups/by-telegram-chat/:telegramChatId/roster", (c) => {
     })),
     memberCount,
     seenCount,
-    unseenCount
+    unseenCount,
+    backfillError: backfillError ?? null
   });
 });
 

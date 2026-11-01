@@ -346,6 +346,8 @@ export function BillEditor(props: BillEditorProps) {
     isLoading: groupMembersLoading,
     memberCount: groupMemberCount,
     unseenCount: groupUnseenCount,
+    status: groupRosterStatus,
+    statusMessage: groupRosterStatusMessage,
   } = useTelegramGroupMembers();
 
   const groupMemberNames = useMemo(
@@ -2378,11 +2380,16 @@ export function BillEditor(props: BillEditorProps) {
               <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 From this group
               </div>
-              {groupMembers.length === 0 ? (
+              {groupMembersLoading ? (
+                <p className="text-sm text-muted-foreground">Loading roster…</p>
+              ) : groupMembers.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No roster yet. Run /split in the group (admins are backfilled),
-                  or add people by name above. The bot only learns members it can
-                  see.
+                  {groupRosterStatusMessage ??
+                    (groupRosterStatus === "auth_error"
+                      ? "Could not authorize with Telegram. Close and re-open Splitbot from /split."
+                      : groupRosterStatus === "no_context"
+                        ? "Open Splitbot from /split in the group so the roster can load."
+                        : "No members yet. Run /split in the group. If it stays empty, disable BotFather /setprivacy or make the bot a group admin, then re-run /split. You can still add people by name above.")}
                   {import.meta.env.DEV ? (
                     <>
                       {" "}
