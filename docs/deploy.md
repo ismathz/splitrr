@@ -57,7 +57,8 @@ systemctl --user restart splitbot-api splitbot-bot splitbot-static
 systemctl --user is-active splitbot-api splitbot-bot splitbot-static
 ```
 
-Optional smoke: `curl -fsS https://splitrr.ismath.dev/health`
+Optional smoke: `curl -fsS https://splitrr.ismath.dev/api/health`  
+(Bare `/health` is often the **bot** `{ok:true}` via the tunnel — use `/api/health` for API + Telegram token fingerprint.)
 
 Units restarted: `splitbot-api` (:3000), `splitbot-bot` (:3001), `splitbot-static` (:8787).  
 Public URL: https://splitrr.ismath.dev (Cloudflare Tunnel via `cloudflared-splitbot`).
@@ -112,13 +113,13 @@ VITE_BOT_MINIAPP_API=https://bot.example.com \
 - Mini App sends Telegram `initData` via `Authorization: tma …`, `X-Telegram-Init-Data`, FormData, and query fallback. API HMAC-verifies with key `WebAppData` + `auth_date`.
 - **`TELEGRAM_BOT_TOKEN` must be identical for `splitbot-api` and `splitbot-bot`**, and must be the token for the bot that owns the Mini App (`@SplitrrBot`). A mismatched API token produces `invalid_init_data` / `bad_hash`.
 - Prefer one shared env file for both units, e.g. `EnvironmentFile=%h/apps/splitbot/.env` on **both** systemd user services. Avoid a divergent `apps/api/.env` vs root `.env`.
-- Check live token fingerprint (no secret): `curl -fsS https://splitrr.ismath.dev/health` → `telegram.botId`, `telegram.tokenSuffix`, `telegram.getMeUsername`, `hmacAlgo` (`WebAppData-as-key-v1`), `gitSha`.
+- Check live token fingerprint (no secret): `curl -fsS https://splitrr.ismath.dev/api/health` → `service:"api"`, `telegram.botId`, `telegram.tokenSuffix`, `telegram.getMeUsername`, `hmacAlgo` (`WebAppData-as-key-v1`), `gitSha`.
 - Confirm token: `curl -fsS "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe"` should return `"username":"SplitrrBot"`. Same check from the API host after loading the same env the API process uses.
 - VPS checklist when Mini App still shows `bad_hash` after a deploy that reports `hmacAlgo: WebAppData-as-key-v1`:
-  1. `curl -fsS https://splitrr.ismath.dev/health` — note `telegram.botId` / `tokenSuffix` / `getMeUsername` / `tokenMatchesExpectedBot`.
-  2. On the VPS, from the **same** env the API unit loads: `systemctl --user show-environment` / `EnvironmentFile=` on `splitbot-api` and `splitbot-bot` must point at one shared `.env` (or identical `TELEGRAM_BOT_TOKEN` values).
+  1. `curl -fsS https://splitrr.ismath.dev/api/health` — must include `service:"api"`. Note `telegram.botId` / `tokenSuffix` / `getMeUsername` / `tokenMatchesExpectedBot`.
+  2. On the VPS, from the **same** env the API unit loads: `systemctl --user cat splitbot-api splitbot-bot` — both should share one `EnvironmentFile=` (prefer `%h/apps/splitbot/.env`). Avoid a divergent `apps/api/.env` (API loads it after root `.env` and it wins).
   3. `curl -fsS "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe"` → `"username":"SplitrrBot"` and `id` must equal health `telegram.botId`.
-  4. If API `botId` ≠ bot `getMe.id`, copy the bot’s token into the API env and `systemctl --user restart splitbot-api`.
+  4. If API `botId` ≠ bot `getMe.id`, copy the bot’s token into the shared `.env` and `systemctl --user restart splitbot-api splitbot-bot`.
   5. Fully close the Mini App (swipe away), send `/split`, reopen, retry upload.
 - Reminders: `POST /api/reminders/run` with header `X-Cron-Secret: $REMINDER_CRON_SECRET`.
 - Never set `SPLITBOT_DEV_AUTH_BYPASS=true` or `VITE_SPLITBOT_USE_MOCK_DATA=true` for production builds. Mock bill/member fixtures are DEV-only and require the Vite flag.

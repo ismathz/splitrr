@@ -169,10 +169,11 @@ void getTelegramDiagCached().catch((err) =>
   console.warn("[api] telegram diag warm failed", err)
 );
 
-app.get("/health", async (c) => {
+async function healthPayload() {
   const telegram = await getTelegramDiagCached();
-  return c.json({
-    ok: true,
+  return {
+    ok: true as const,
+    service: "api",
     gitSha: telegram.gitSha,
     hmacAlgo: telegram.hmacAlgo,
     telegram: {
@@ -185,16 +186,25 @@ app.get("/health", async (c) => {
       getMeError: telegram.getMe.error ?? null,
       tokenMatchesExpectedBot: telegram.tokenMatchesExpectedBot
     }
-  });
-});
+  };
+}
+
+// Local / direct :3000. Public tunnel often maps bare `/health` to the bot.
+app.get("/health", async (c) => c.json(await healthPayload()));
 
 app.use("/api/reminders/*", requireCronSecret);
 app.use("/api/*", async (c, next) => {
-  if (c.req.path.startsWith("/api/reminders/")) {
+  // `/api/health` is public (tunnel routes `/api/*` → API; bare `/health` hits bot).
+  if (
+    c.req.path === "/api/health" ||
+    c.req.path.startsWith("/api/reminders/")
+  ) {
     return next();
   }
   return requireTelegramAuth(c, next);
 });
+
+app.get("/api/health", async (c) => c.json(await healthPayload()));
 
 app.post("/api/bills", async (c) => {
   const body = await c.req.json<{
