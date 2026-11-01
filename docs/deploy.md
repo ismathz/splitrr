@@ -70,8 +70,16 @@ Public URL: https://splitrr.ismath.dev (Cloudflare Tunnel via `cloudflared-split
 - Cloudflare Tunnel (`cloudflared-splitbot`) exposes https://splitrr.ismath.dev
 - SQLite DB path on persistent volume, e.g. `/var/lib/splitbot/splitbot.db`
 - Cloudflare R2 credentials set in env (`S3_*`) and validated on API startup (`HeadBucket`)
-- Required for receipt scan: `OPENROUTER_API_KEY` **with usable credit**, optional `OPENROUTER_BASE_URL` (default `https://openrouter.ai/api/v1`), `OPENROUTER_MODEL` (default `openai/gpt-4o-mini`), and full `S3_*` set
-- **Remove** legacy `OPENAI_API_KEY` / `OPENAI_MODEL` from the VPS `.env` — the API no longer reads them
+- Required for receipt scan (add to VPS `.env`, then `systemctl --user restart splitbot-api`):
+
+| Env | Required? | Example / default |
+| --- | --- | --- |
+| `OPENROUTER_API_KEY` | **Yes** | `sk-or-v1-…` from https://openrouter.ai/keys |
+| `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` |
+| `OPENROUTER_MODEL` | No | `openai/gpt-4o-mini` (any vision-capable OpenRouter model) |
+| `S3_*` | Yes | unchanged R2 credentials |
+
+- **Remove** legacy `OPENAI_API_KEY` / `OPENAI_MODEL` from the VPS `.env` — the API no longer reads them (API will fail to boot if only those remain)
 - Dig: `curl -fsS https://splitrr.ismath.dev/api/health` (shows `openrouter.keyConfigured` / `openrouter.model` / `storage.bucket`) and `curl -fsS https://splitrr.ismath.dev/api/pipeline/last-failures`
 - If dig shows `openrouter_quota_exhausted` / HTTP 402 / insufficient credits: top up OpenRouter credits for that key (not a Splitbot rate-limit)
 - Production env: `NODE_ENV=production`, `SPLITBOT_DEV_AUTH_BYPASS` unset/false, `TELEGRAM_BOT_TOKEN` set
