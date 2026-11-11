@@ -29,6 +29,12 @@ import {
   parseTelegramUserFromInitData,
   validateWebAppInitData
 } from "./telegramWebAppAuth";
+import {
+  handleWidgetQuery,
+  markDmStarted,
+  sendBalanceWidget,
+  type WidgetQueryUpdate
+} from "./widgets/handlers";
 
 const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 const db = createDb(env.SQLITE_PATH);
@@ -118,6 +124,21 @@ const DEEP_LINK_SETUP_HINT =
   "Group deep links need TELEGRAM_BOT_USERNAME and TELEGRAM_MINI_APP_SHORT_NAME " +
   "on the bot host. Ask the admin to set them and restart the bot.";
 
+bot.use(async (ctx, next) => {
+  const raw = ctx.update as { widget_query?: WidgetQueryUpdate };
+  if (raw.widget_query) {
+    await handleWidgetQuery({
+      db,
+      botToken: env.TELEGRAM_BOT_TOKEN,
+      query: raw.widget_query,
+      botUsername: env.TELEGRAM_BOT_USERNAME,
+      miniAppShortName: env.TELEGRAM_MINI_APP_SHORT_NAME
+    });
+    return;
+  }
+  return next();
+});
+
 bot.command("start", async (ctx) => {
   const chat = ctx.chat;
   const chatType = chat?.type ?? "private";
@@ -130,15 +151,88 @@ bot.command("start", async (ctx) => {
     directUrl: direct
   });
 
+  if (chat?.type === "private" && ctx.from) {
+    markDmStarted(db, ctx.from);
+    await ctx.reply(
+      "Splitrr is ready. Use /split to open the Mini App, or /balance for your personal balance card.",
+      replyMarkup ? { reply_markup: replyMarkup } : undefined
+    );
+    await sendBalanceWidget({
+      db,
+      botToken: env.TELEGRAM_BOT_TOKEN,
+      chatId: chat.id,
+      telegramUserId: ctx.from.id,
+      botUsername: env.TELEGRAM_BOT_USERNAME,
+      miniAppShortName: env.TELEGRAM_MINI_APP_SHORT_NAME
+    });
+    return;
+  }
+
   await ctx.reply(
     "Splitrr is ready. Use /split in a group (or here in DM) to open the Mini App, then scan a receipt or start an empty bill.",
     replyMarkup ? { reply_markup: replyMarkup } : undefined
   );
 });
 
+bot.command("balance", async (ctx) => {
+  const chat = ctx.chat;
+  if (!chat || chat.type !== "private" || !ctx.from) {
+    await ctx.reply("Use /balance in a private chat with Splitrr.");
+    return;
+  }
+  markDmStarted(db, ctx.from);
+  await sendBalanceWidget({
+    db,
+    botToken: env.TELEGRAM_BOT_TOKEN,
+    chatId: chat.id,
+    telegramUserId: ctx.from.id,
+    botUsername: env.TELEGRAM_BOT_USERNAME,
+    miniAppShortName: env.TELEGRAM_MINI_APP_SHORT_NAME
+  });
+});
+
+bot.command("paydetails", async (ctx) => {
+  const chat = ctx.chat;
+  if (!chat || chat.type !== "private" || !ctx.from) {
+    await ctx.reply("Use /paydetails in a private chat with Splitrr.");
+    return;
+  }
+  markDmStarted(db, ctx.from);
+  const text = (ctx.match ?? "").toString().trim();
+  if (!text) {
+    db.query(
+      `UPDATE users SET payment_details = NULL WHERE telegram_user_id = ?1`,
+    ).run(String(ctx.from.id));
+    await ctx.reply(
+      "Payment details cleared. Send /paydetails followed by your info (e.g. /paydetails Venmo @you) to store them for Splitrr cards.",
+    );
+    return;
+  }
+  const clipped = text.slice(0, 200);
+  db.query(
+    `INSERT INTO users (telegram_user_id, username, first_name, last_name, payment_details, dm_started_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
+     ON CONFLICT(telegram_user_id) DO UPDATE SET
+       payment_details = excluded.payment_details,
+       username = COALESCE(excluded.username, users.username),
+       first_name = COALESCE(excluded.first_name, users.first_name),
+       last_name = COALESCE(excluded.last_name, users.last_name),
+       dm_started_at = COALESCE(users.dm_started_at, datetime('now'))`,
+  ).run(
+    String(ctx.from.id),
+    ctx.from.username ?? null,
+    ctx.from.first_name ?? null,
+    ctx.from.last_name ?? null,
+    clipped,
+  );
+  await ctx.reply(
+    `Saved payment details for Splitrr cards:\n${clipped}`,
+  );
+});
+
 bot.command("help", async (ctx) => {
   await ctx.reply(
-    "Commands:\n/split - open Splitrr Mini App\n/history - latest bills\n/help - this message"
+    "Commands:\n/split - open Splitrr Mini App\n/balance - your balance card (DM)\n/paydetails - store payment copy-text (DM)\n/history - latest bills\n/help - this message"
   );
 });
 

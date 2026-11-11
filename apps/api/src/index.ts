@@ -37,6 +37,7 @@ import {
   statusAfterOpenWithMembers,
   statusFromPaymentChecklist
 } from "./billStatus";
+import { notifyNewlyAddedMembers } from "./widgets/notifyAdded";
 
 const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
@@ -997,7 +998,16 @@ app.patch("/api/bills/:billId", async (c) => {
     }
   }
 
+  const previousMembers = (
+    db
+      .query(
+        `SELECT member_name FROM bill_session_members WHERE bill_session_id = ?1`,
+      )
+      .all(billId) as Array<{ member_name: string }>
+  ).map((r) => r.member_name);
+
   let memberCountForStatus = 0;
+  let nextMembersForNotify: string[] | null = null;
   if (Array.isArray(body.members)) {
     db.query("DELETE FROM bill_session_members WHERE bill_session_id = ?1").run(
       billId
@@ -1007,12 +1017,14 @@ app.patch("/api/bills/:billId", async (c) => {
        VALUES (?1, ?2, ?3)`
     );
     const seen = new Set<string>();
+    const nextMembers: string[] = [];
     for (const raw of body.members) {
       const memberName = raw.trim();
       if (!memberName) continue;
       const key = memberName.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
+      nextMembers.push(memberName);
       insertMember.run(randomUUID(), billId, memberName);
       // Keep synthetic users + group roster in sync for settlements/export.
       const userId = resolveNamedUserId(memberName);
@@ -1021,6 +1033,7 @@ app.patch("/api/bills/:billId", async (c) => {
       }
     }
     memberCountForStatus = seen.size;
+    nextMembersForNotify = nextMembers;
   } else if (Array.isArray(body.items)) {
     // Older clients omit members: derive from assignees so the roster sticks.
     const derived = new Set<string>();
@@ -1038,10 +1051,13 @@ app.patch("/api/bills/:billId", async (c) => {
         `INSERT OR IGNORE INTO bill_session_members (id, bill_session_id, member_name)
          VALUES (?1, ?2, ?3)`
       );
+      const nextMembers: string[] = [];
       for (const memberName of derived) {
+        nextMembers.push(memberName);
         insertMember.run(randomUUID(), billId, memberName);
       }
       memberCountForStatus = derived.size;
+      nextMembersForNotify = nextMembers;
     }
   } else {
     const countRow = db
@@ -1064,6 +1080,19 @@ app.patch("/api/bills/:billId", async (c) => {
     exists.status === "settled"
   ) {
     sessions.updateStatus(billId, nextStatus);
+  }
+
+  if (nextMembersForNotify) {
+    // Fire-and-forget DM widgets; do not block the save response.
+    void notifyNewlyAddedMembers({
+      db,
+      botToken: env.TELEGRAM_BOT_TOKEN,
+      billId,
+      previousMembers,
+      nextMembers: nextMembersForNotify,
+      botUsername: env.TELEGRAM_BOT_USERNAME,
+      miniAppShortName: env.TELEGRAM_MINI_APP_SHORT_NAME,
+    }).catch((err) => console.warn("[widgets] notify added", err));
   }
 
   return c.json({ ok: true });

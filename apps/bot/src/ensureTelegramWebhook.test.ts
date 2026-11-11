@@ -33,7 +33,7 @@ describe("webhookAllowsRosterUpdates", () => {
     expect(webhookAllowsRosterUpdates(base)).toBe(false);
   });
 
-  it("requires both message and chat_member", () => {
+  it("requires message, chat_member, and widget_query", () => {
     expect(
       webhookAllowsRosterUpdates({
         ...base,
@@ -44,6 +44,12 @@ describe("webhookAllowsRosterUpdates", () => {
       webhookAllowsRosterUpdates({
         ...base,
         allowedUpdates: ["chat_member"]
+      }),
+    ).toBe(false);
+    expect(
+      webhookAllowsRosterUpdates({
+        ...base,
+        allowedUpdates: ["message", "chat_member"]
       }),
     ).toBe(false);
     expect(

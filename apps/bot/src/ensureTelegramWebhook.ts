@@ -10,7 +10,8 @@ export const ROSTER_ALLOWED_UPDATES = [
   "edited_message",
   "callback_query",
   "my_chat_member",
-  "chat_member"
+  "chat_member",
+  "widget_query"
 ] as const;
 
 export type EnsureWebhookConfig = {
@@ -77,8 +78,13 @@ export function webhookAllowsRosterUpdates(info: WebhookInfoSummary | null): boo
   const allowed = info.allowedUpdates;
   // Empty allowed_updates means Telegram default: all except chat_member /
   // message_reaction / message_reaction_count — so message yes, chat_member no.
+  // Explicit lists must also include widget_query for balance / added cards.
   if (allowed.length === 0) return false;
-  return allowed.includes("message") && allowed.includes("chat_member");
+  return (
+    allowed.includes("message") &&
+    allowed.includes("chat_member") &&
+    allowed.includes("widget_query")
+  );
 }
 
 /**

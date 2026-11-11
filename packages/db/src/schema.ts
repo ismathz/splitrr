@@ -197,3 +197,12 @@ WHERE status = 'draft'
     WHERE i.bill_session_id = bill_sessions.id
   );
 `;
+
+/**
+ * DM readiness + optional payment copy-text for widget cards.
+ * dm_started_at is set when the user messages the bot in private chat.
+ */
+export const v9UserDmAndPaymentDetails = `
+ALTER TABLE users ADD COLUMN dm_started_at TEXT;
+ALTER TABLE users ADD COLUMN payment_details TEXT;
+`;
