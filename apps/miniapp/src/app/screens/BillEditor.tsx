@@ -64,7 +64,7 @@ import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
 
 import { type Item } from "../billTypes";
 import {
-  AUTO_FILL_MAX_GROUP_SIZE,
+  defaultNewBillMembers,
   parseStartParamHasCid,
   type TelegramGroupMember,
   useTelegramGroupMembers,
@@ -829,30 +829,20 @@ export function BillEditor(props: BillEditorProps) {
     if (isEditMode) return;
     if (!allowAutofillFromGroupContext) return;
 
-    // Always pre-select the current Mini App user when present in the roster.
-    // Small groups: include everyone. Larger: roster checkboxes, you by default.
-    if (groupMembers.length > 0 && groupMembers.length <= AUTO_FILL_MAX_GROUP_SIZE) {
-      setBillMembers(groupMemberNames);
-      return;
-    }
-
-    const selfName =
-      (launchCtx.currentUser?.id != null
-        ? groupMembers.find((m) => m.tgUserId === launchCtx.currentUser?.id)?.name
-        : null) ??
-      (currentUserDisplayName &&
-      isNameInGroup(currentUserDisplayName, groupMemberNames)
-        ? canonicalMemberName(currentUserDisplayName, groupMemberNames)
-        : currentUserDisplayName);
-
-    if (selfName?.trim()) {
-      setBillMembers([selfName.trim()]);
+    // New bills: only the creator (current viewer) is selected. Roster stays
+    // listed unchecked so the user taps to add others.
+    const selected = defaultNewBillMembers({
+      groupMembers,
+      currentUserId: launchCtx.currentUser?.id,
+      currentUserDisplayName,
+    });
+    if (selected.length > 0) {
+      setBillMembers(selected);
     }
   }, [
     groupMembers,
     groupMembersLoading,
     allowAutofillFromGroupContext,
-    groupMemberNames,
     isEditMode,
     launchCtx.currentUser?.id,
     currentUserDisplayName,
@@ -1324,11 +1314,9 @@ export function BillEditor(props: BillEditorProps) {
       {!isEditMode ? (
         <span className="w-full text-xs text-muted-foreground">
           {groupMembers.length > 0
-            ? groupMembers.length > AUTO_FILL_MAX_GROUP_SIZE
-              ? `Seen ${groupMembers.length}${
-                  groupMemberCount != null ? ` of ${groupMemberCount}` : ""
-                } group members — choose who's in this bill.`
-              : "Assign each line item to people in this bill."
+            ? `You're on this bill — tap Members to add others (seen ${groupMembers.length}${
+                groupMemberCount != null ? ` of ${groupMemberCount}` : ""
+              }).`
             : "Tap Add members to pick from the group roster, or add someone by name."}
         </span>
       ) : null}

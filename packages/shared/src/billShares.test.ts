@@ -29,6 +29,19 @@ describe("billShares", () => {
     );
   });
 
+  it("works with a single selected participant", () => {
+    const shares = itemSharesByMember([
+      { totalPriceCents: 2500, assignees: ["Solo"] },
+      { totalPriceCents: 499, assignees: ["Solo"] },
+    ]);
+    expect(shares.get("Solo")).toBe(2999);
+    expect(sumShares(shares)).toBe(2999);
+
+    const withCharges = applyChargesProportionally(shares, 101);
+    expect(withCharges.get("Solo")).toBe(3100);
+    expect(sumShares(withCharges)).toBe(3100);
+  });
+
   it("regression: 3×40.00 items + charges → 142.55 fair shares", () => {
     const shares = itemSharesByMember([
       { totalPriceCents: 4000, assignees: ["A"] },

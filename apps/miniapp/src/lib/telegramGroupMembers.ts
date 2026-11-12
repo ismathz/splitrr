@@ -34,9 +34,6 @@ export type TelegramGroupMember = {
   photoUrl?: string;
 };
 
-/** Members are auto-added to the bill when the Telegram group has at most this many members. */
-export const AUTO_FILL_MAX_GROUP_SIZE = 10;
-
 export type RosterLoadStatus =
   | "idle"
   | "loading"
@@ -56,6 +53,38 @@ function dedupeNames(names: string[]): string[] {
     out.push(t);
   }
   return out;
+}
+
+/**
+ * Default selected participants for a **new** bill: only the current viewer
+ * (bill creator). Other roster / joined / placeholder names stay listed in the
+ * members UI but unselected until the user taps to add them.
+ *
+ * Edit mode should skip this and keep saved `bill.members`.
+ */
+export function defaultNewBillMembers(input: {
+  groupMembers: ReadonlyArray<{ name: string; tgUserId?: number }>;
+  currentUserId?: number | null;
+  currentUserDisplayName?: string | null;
+}): string[] {
+  const { groupMembers, currentUserId, currentUserDisplayName } = input;
+
+  const byTelegramId =
+    currentUserId != null
+      ? groupMembers.find((m) => m.tgUserId === currentUserId)?.name
+      : undefined;
+  if (byTelegramId?.trim()) return [byTelegramId.trim()];
+
+  const display = currentUserDisplayName?.trim();
+  if (!display) return [];
+
+  const lower = display.toLowerCase();
+  const rosterMatch = groupMembers.find(
+    (m) => m.name.trim().toLowerCase() === lower,
+  )?.name;
+  if (rosterMatch?.trim()) return [rosterMatch.trim()];
+
+  return [display];
 }
 
 /**
