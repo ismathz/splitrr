@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { applyChargesProportionally } from "../billShares";
 import { compactJsonUnderBudget, truncateUtf8 } from "./size";
 import type { BalanceChatData, BalanceLineData } from "./types";
 
@@ -258,6 +259,21 @@ export function buildBalanceChatData(
         const uniqTotal = [...byItem.values()].reduce((s, e) => s + e.total, 0) || total;
         const each = Math.floor(uniqTotal / memberNames.length);
         for (const name of memberNames) shares.set(name, each);
+      }
+
+      const chargeRows = db
+        .query(
+          `SELECT amount_cents AS amountCents FROM charges WHERE bill_session_id = ?1`,
+        )
+        .all(bill.billId) as Array<{ amountCents: number }>;
+      const chargesTotal = chargeRows.reduce(
+        (s, r) => s + (r.amountCents || 0),
+        0,
+      );
+      if (chargesTotal !== 0) {
+        const withCharges = applyChargesProportionally(shares, chargesTotal);
+        shares.clear();
+        for (const [name, amt] of withCharges) shares.set(name, amt);
       }
 
       const viewerShare = shares.get(matchedName) ?? 0;

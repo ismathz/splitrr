@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { applyChargesProportionally } from "../billShares";
 import { compactJsonUnderBudget, truncateUtf8 } from "./size";
 import type { AddedChatData, AddedItemData } from "./types";
 
@@ -68,12 +69,15 @@ export function buildAddedChatData(
 
   const memberKey = input.memberName.trim().toLowerCase();
   const items: AddedItemData[] = [];
-  let share = 0;
+  const itemShares = new Map<string, number>();
   for (const entry of byItem.values()) {
+    const n = Math.max(entry.assignees.length, 1);
+    const part = Math.floor(entry.total / n);
+    for (const name of entry.assignees) {
+      itemShares.set(name, (itemShares.get(name) ?? 0) + part);
+    }
     const hit = entry.assignees.some((a) => a.toLowerCase() === memberKey);
     if (!hit) continue;
-    const part = Math.floor(entry.total / Math.max(entry.assignees.length, 1));
-    share += part;
     items.push({ n: truncateUtf8(entry.name, 28), a: part });
   }
 
@@ -86,7 +90,38 @@ export function buildAddedChatData(
       .get(input.billId) as { c: number };
     const total = [...byItem.values()].reduce((s, e) => s + e.total, 0);
     const n = Math.max(Number(memberCountRow.c) || 1, 1);
-    share = Math.floor(total / n);
+    const each = Math.floor(total / n);
+    const members = db
+      .query(
+        `SELECT member_name FROM bill_session_members WHERE bill_session_id = ?1`,
+      )
+      .all(input.billId) as Array<{ member_name: string }>;
+    for (const row of members) {
+      const name = row.member_name.trim();
+      if (name) itemShares.set(name, each);
+    }
+    if (itemShares.size === 0) {
+      itemShares.set(input.memberName.trim(), each);
+    }
+  }
+
+  const chargeRows = db
+    .query(
+      `SELECT amount_cents AS amountCents FROM charges WHERE bill_session_id = ?1`,
+    )
+    .all(input.billId) as Array<{ amountCents: number }>;
+  const chargesTotal = chargeRows.reduce((s, r) => s + (r.amountCents || 0), 0);
+  const sharesWithCharges =
+    chargesTotal !== 0
+      ? applyChargesProportionally(itemShares, chargesTotal)
+      : itemShares;
+
+  let share = 0;
+  for (const [name, amt] of sharesWithCharges) {
+    if (name.toLowerCase() === memberKey) {
+      share = amt;
+      break;
+    }
   }
 
   const paidRow = db

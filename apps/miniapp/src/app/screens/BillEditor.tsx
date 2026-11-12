@@ -288,6 +288,13 @@ export interface BillEditorInitialBill {
   currency: string;
   members?: string[];
   items: Item[];
+  charges?: Array<{
+    id?: string;
+    chargeType: string;
+    amountCents: number;
+    label?: string | null;
+    ratePct?: number | null;
+  }>;
 }
 
 export type BillEditorMode =
@@ -632,23 +639,84 @@ export function BillEditor(props: BillEditorProps) {
     () => initialBill?.currency ?? "MVR",
   );
   const currencyLabel = currencyCode;
+  const initialCharges = initialBill?.charges ?? [];
+  const initialService = initialCharges.find(
+    (c) => c.chargeType === "service",
+  );
+  const initialTax = initialCharges.find((c) => c.chargeType === "tax");
+  const initialCustomCharges = initialCharges.filter(
+    (c) =>
+      c.chargeType !== "service" &&
+      c.chargeType !== "tax",
+  );
+
+  const inferPct = (amountCents: number, baseCents: number): number | null => {
+    if (amountCents <= 0 || baseCents <= 0) return null;
+    return Math.round((amountCents / baseCents) * 10000) / 100;
+  };
+  const initialItemsSubtotal = (initialBill?.items ?? []).reduce(
+    (s, it) => s + it.totalPriceCents,
+    0,
+  );
+  const initialServicePct =
+    initialService?.ratePct && initialService.ratePct > 0
+      ? initialService.ratePct
+      : initialService
+        ? inferPct(initialService.amountCents, initialItemsSubtotal) ?? 10
+        : 10;
+  const initialServiceAmount = initialService?.amountCents ?? 0;
+  const initialTaxPct =
+    initialTax?.ratePct && initialTax.ratePct > 0
+      ? initialTax.ratePct
+      : initialTax
+        ? inferPct(
+            initialTax.amountCents,
+            initialItemsSubtotal + initialServiceAmount,
+          ) ?? 8
+        : 8;
+
   // Latent rates for when the user manually adds a charge; OCR overwrites when present.
-  const [serviceChargeRatePct, setServiceChargeRatePct] = useState(10);
-  const [taxRatePct, setTaxRatePct] = useState(8);
-  const [serviceChargeRateInput, setServiceChargeRateInput] = useState("10");
-  const [taxRateInput, setTaxRateInput] = useState("8");
+  const [serviceChargeRatePct, setServiceChargeRatePct] =
+    useState(initialServicePct);
+  const [taxRatePct, setTaxRatePct] = useState(initialTaxPct);
+  const [serviceChargeRateInput, setServiceChargeRateInput] = useState(
+    String(initialServicePct),
+  );
+  const [taxRateInput, setTaxRateInput] = useState(String(initialTaxPct));
   const [editingRateField, setEditingRateField] = useState<
     "serviceCharge" | "tax" | null
   >(null);
-  // Do not auto-apply fixed SC/tax — enable only from OCR (or manual Add).
-  const [isServiceChargeEnabled, setIsServiceChargeEnabled] = useState(false);
-  const [isTaxEnabled, setIsTaxEnabled] = useState(false);
+  // Do not auto-apply fixed SC/tax — enable from OCR, saved charges, or manual Add.
+  const [isServiceChargeEnabled, setIsServiceChargeEnabled] = useState(
+    () => !!initialService && initialService.amountCents !== 0,
+  );
+  const [isTaxEnabled, setIsTaxEnabled] = useState(
+    () => !!initialTax && initialTax.amountCents !== 0,
+  );
+  const hydratedCustomAdjustments: CustomAdjustment[] =
+    initialCustomCharges.map((c, index) => {
+      const rate =
+        typeof c.ratePct === "number" && c.ratePct > 0 ? c.ratePct : null;
+      return {
+        id: c.id?.trim() || `saved-adj-${index}-${c.chargeType}`,
+        name:
+          c.label?.trim() ||
+          (c.chargeType === "discount"
+            ? "Discount"
+            : c.chargeType === "tip"
+              ? "Tip"
+              : "Adjustment"),
+        amountType: rate != null ? ("percentage" as const) : ("fixed" as const),
+        value: rate != null ? rate : Math.round(c.amountCents) / 100,
+      };
+    });
   const [customAdjustments, setCustomAdjustments] = useState<
     CustomAdjustment[]
-  >([]);
-  const [chargeRowOrder, setChargeRowOrder] = useState<string[]>([
+  >(() => hydratedCustomAdjustments);
+  const [chargeRowOrder, setChargeRowOrder] = useState<string[]>(() => [
     SERVICE_CHARGE_ROW_ID,
     TAX_ROW_ID,
+    ...hydratedCustomAdjustments.map((a) => a.id),
   ]);
   const [isAddingAdjustment, setIsAddingAdjustment] = useState(false);
   const [adjustmentNameInput, setAdjustmentNameInput] = useState("");
@@ -671,6 +739,9 @@ export function BillEditor(props: BillEditorProps) {
   );
 
   useEffect(() => {
+    // Only apply OCR discount lines when OCR actually produced them —
+    // do not wipe charges hydrated from a saved bill on mount.
+    if (ocrDiscountAdjustments.length === 0) return;
     setCustomAdjustments(ocrDiscountAdjustments);
   }, [ocrDiscountAdjustments]);
 
@@ -1114,6 +1185,38 @@ export function BillEditor(props: BillEditorProps) {
   const saveBill = useCallback(async () => {
     setSaveBillError(null);
 
+    const chargesPayload: Array<{
+      chargeType: string;
+      amountCents: number;
+      label?: string | null;
+      ratePct?: number | null;
+    }> = [];
+    if (isServiceChargeEnabled && serviceChargeCents !== 0) {
+      chargesPayload.push({
+        chargeType: "service",
+        amountCents: serviceChargeCents,
+        label: "Service Charge",
+        ratePct: serviceChargeRatePct,
+      });
+    }
+    if (isTaxEnabled && taxCents !== 0) {
+      chargesPayload.push({
+        chargeType: "tax",
+        amountCents: taxCents,
+        label: "Tax",
+        ratePct: taxRatePct,
+      });
+    }
+    for (const row of customAdjustmentRows) {
+      if (row.cents === 0) continue;
+      chargesPayload.push({
+        chargeType: "custom",
+        amountCents: row.cents,
+        label: row.name,
+        ratePct: row.amountType === "percentage" ? row.value : null,
+      });
+    }
+
     const persistPayload = {
       billDate,
       place: billPlace.trim() || null,
@@ -1124,6 +1227,7 @@ export function BillEditor(props: BillEditorProps) {
         totalPriceCents: it.totalPriceCents,
         assignees: it.assignees,
       })),
+      charges: chargesPayload,
     };
 
     // Edit mode: PATCH the existing bill.
@@ -1200,6 +1304,13 @@ export function BillEditor(props: BillEditorProps) {
     billPlace,
     billMembersOrdered,
     items,
+    isServiceChargeEnabled,
+    isTaxEnabled,
+    serviceChargeCents,
+    taxCents,
+    serviceChargeRatePct,
+    taxRatePct,
+    customAdjustmentRows,
     props,
   ]);
 

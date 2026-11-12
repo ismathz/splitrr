@@ -10,6 +10,7 @@ import {
 } from "@splitbot/db";
 import type { ParsedReceipt } from "@splitbot/shared";
 import { inferOcrCharges } from "./ocrCharges";
+import { loadBillCharges, replaceBillCharges } from "./billCharges";
 import { env } from "./env";
 import { classifyStorageError, StorageService } from "./storage";
 import { OpenRouterOcrProvider, toOcrImageDataUrl } from "./ocr";
@@ -624,28 +625,44 @@ app.post("/api/bills/:billId/ocr", async (c) => {
       );
     }
 
+    const ocrCharges: Array<{
+      chargeType: string;
+      amountCents: number;
+      label?: string | null;
+      ratePct?: number | null;
+    }> = [];
     if (receipt.serviceChargeCents) {
-      db.query(
-        `INSERT INTO charges (id, bill_session_id, charge_type, amount_cents) VALUES (?1, ?2, 'service', ?3)`
-      ).run(randomUUID(), billId, receipt.serviceChargeCents);
+      ocrCharges.push({
+        chargeType: "service",
+        amountCents: receipt.serviceChargeCents,
+        label: "Service Charge",
+        ratePct: receipt.serviceChargeRatePct ?? null,
+      });
     }
-
     if (receipt.taxCents) {
-      db.query(
-        `INSERT INTO charges (id, bill_session_id, charge_type, amount_cents) VALUES (?1, ?2, 'tax', ?3)`
-      ).run(randomUUID(), billId, receipt.taxCents);
+      ocrCharges.push({
+        chargeType: "tax",
+        amountCents: receipt.taxCents,
+        label: "Tax",
+        ratePct: receipt.taxRatePct ?? null,
+      });
     }
-
     if (receipt.tipCents) {
-      db.query(
-        `INSERT INTO charges (id, bill_session_id, charge_type, amount_cents) VALUES (?1, ?2, 'tip', ?3)`
-      ).run(randomUUID(), billId, receipt.tipCents);
+      ocrCharges.push({
+        chargeType: "tip",
+        amountCents: receipt.tipCents,
+        label: "Tip",
+      });
     }
-
     for (const discount of receipt.discountAdjustments ?? []) {
-      db.query(
-        `INSERT INTO charges (id, bill_session_id, charge_type, amount_cents) VALUES (?1, ?2, 'discount', ?3)`
-      ).run(randomUUID(), billId, discount.amountCents);
+      ocrCharges.push({
+        chargeType: "discount",
+        amountCents: discount.amountCents,
+        label: discount.name?.trim() || "Discount",
+      });
+    }
+    if (ocrCharges.length > 0) {
+      replaceBillCharges(db, billId, ocrCharges);
     }
 
     if (receiptRow) {
@@ -885,6 +902,8 @@ app.get("/api/bills/:billId", (c) => {
     };
   });
 
+  const charges = loadBillCharges(db, billId);
+
   const status = normalizeBillSessionStatus(session.status);
   return c.json({
     id: session.id,
@@ -897,6 +916,7 @@ app.get("/api/bills/:billId", (c) => {
     members,
     memberProfiles,
     items: mappedItems,
+    charges,
   });
 });
 
@@ -912,6 +932,13 @@ app.patch("/api/bills/:billId", async (c) => {
       name: string;
       totalPriceCents: number;
       assignees?: string[];
+    }>;
+    charges?: Array<{
+      id?: string;
+      chargeType: string;
+      amountCents: number;
+      label?: string | null;
+      ratePct?: number | null;
     }>;
   }>();
   const nextTitle = body.title?.trim();
@@ -996,6 +1023,10 @@ app.patch("/api/bills/:billId", async (c) => {
         insertAssignment.run(randomUUID(), itemId, userId);
       }
     }
+  }
+
+  if (Array.isArray(body.charges)) {
+    replaceBillCharges(db, billId, body.charges);
   }
 
   const previousMembers = (

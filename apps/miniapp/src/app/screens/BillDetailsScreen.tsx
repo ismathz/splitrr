@@ -21,7 +21,13 @@ import {
 import { Toggle } from "@/components/ui/toggle";
 
 import {
+  applyChargesProportionally,
+  itemSharesByMember,
+} from "@splitbot/shared";
+
+import {
   formatBillDateLabel,
+  type BillCharge,
   type BillDetails,
   type Item,
 } from "../billTypes";
@@ -153,17 +159,13 @@ function uniqueMembersInOrder(items: Item[]): string[] {
   return ordered;
 }
 
-function balancesCentsByMember(items: Item[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const item of items) {
-    const share = Math.floor(
-      item.totalPriceCents / Math.max(item.assignees.length, 1),
-    );
-    for (const member of item.assignees) {
-      map.set(member, (map.get(member) ?? 0) + share);
-    }
-  }
-  return map;
+function balancesCentsByMember(
+  items: Item[],
+  charges: BillCharge[] = [],
+): Map<string, number> {
+  const itemShares = itemSharesByMember(items);
+  const chargesTotal = charges.reduce((s, c) => s + c.amountCents, 0);
+  return applyChargesProportionally(itemShares, chargesTotal);
 }
 
 function formatBillMoney(currencyCode: string, cents: number) {
@@ -328,6 +330,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
           members,
           memberProfiles: fetched.memberProfiles ?? [],
           items,
+          charges: fetched.charges ?? [],
         });
       } catch (e) {
         if (cancelled) return;
@@ -354,10 +357,13 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
     if (fromMembers.length > 0) return fromMembers;
     return uniqueMembersInOrder(bill.items);
   }, [bill]);
+  const billCharges = bill?.charges ?? [];
   const balances = useMemo(
     () =>
-      bill ? balancesCentsByMember(bill.items) : new Map<string, number>(),
-    [bill],
+      bill
+        ? balancesCentsByMember(bill.items, billCharges)
+        : new Map<string, number>(),
+    [bill, billCharges],
   );
   const subtotalCents = useMemo(
     () =>
@@ -369,8 +375,20 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
         : 0,
     [bill],
   );
-  const taxCents = 0;
-  const additionalChargesCents = 0;
+  const taxCents = useMemo(
+    () =>
+      billCharges
+        .filter((c) => c.chargeType === "tax")
+        .reduce((s, c) => s + c.amountCents, 0),
+    [billCharges],
+  );
+  const additionalChargesCents = useMemo(
+    () =>
+      billCharges
+        .filter((c) => c.chargeType !== "tax")
+        .reduce((s, c) => s + c.amountCents, 0),
+    [billCharges],
+  );
   const grandTotalCents = subtotalCents + taxCents + additionalChargesCents;
 
   const [paidMemberNames, setPaidMemberNames] = useState<Set<string>>(
@@ -487,6 +505,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
           totalPriceCents: item.totalPriceCents,
           assignees: item.assignees ?? [],
         })),
+        charges: bill.charges ?? [],
       });
     } catch (e) {
       setTitleSaveError(toUserFriendlyErrorMessage(e));
@@ -659,6 +678,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
               ...item,
               assignees: item.assignees ?? [],
             })),
+            charges: bill.charges ?? [],
           },
         }}
         onBack={() => navigate({ to: "/" })}

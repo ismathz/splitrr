@@ -10,6 +10,7 @@ import {
   v7BillSessionStatusPendingCompleted,
   v8PromoteDraftsWithAssignments,
   v9UserDmAndPaymentDetails,
+  v10ChargesLabelAndRate,
 } from "./schema";
 
 const orderedMigrations: Array<{ name: string; sql: string }> = [
@@ -30,6 +31,10 @@ const orderedMigrations: Array<{ name: string; sql: string }> = [
   {
     name: "009_user_dm_payment_details.sql",
     sql: v9UserDmAndPaymentDetails,
+  },
+  {
+    name: "010_charges_label_rate.sql",
+    sql: v10ChargesLabelAndRate,
   },
 ];
 

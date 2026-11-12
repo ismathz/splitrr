@@ -219,6 +219,14 @@ export type ApiBillMemberProfile = {
   tgUserId: number | null;
 };
 
+export type ApiBillCharge = {
+  id: string;
+  chargeType: string;
+  amountCents: number;
+  label: string | null;
+  ratePct: number | null;
+};
+
 export type ApiBillDetails = {
   id: string;
   title: string;
@@ -237,6 +245,7 @@ export type ApiBillDetails = {
     totalPriceCents: number;
     assignees: string[];
   }>;
+  charges?: ApiBillCharge[];
 };
 
 export type ApiBillHistoryEntry = {
@@ -345,6 +354,13 @@ export async function updateBillDetails(
       name: string;
       totalPriceCents: number;
       assignees?: string[];
+    }>;
+    charges?: Array<{
+      id?: string;
+      chargeType: string;
+      amountCents: number;
+      label?: string | null;
+      ratePct?: number | null;
     }>;
   },
 ): Promise<{ ok: true }> {

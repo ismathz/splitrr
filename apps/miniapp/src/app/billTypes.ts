@@ -26,6 +26,15 @@ export type BillMemberProfile = {
   tgUserId?: number | null;
 };
 
+/** Persisted tax / service / custom charge on a bill. */
+export type BillCharge = {
+  id?: string;
+  chargeType: string;
+  amountCents: number;
+  label?: string | null;
+  ratePct?: number | null;
+};
+
 export type BillDetails = {
   id: string;
   title: string;
@@ -43,4 +52,6 @@ export type BillDetails = {
   /** Optional roster photos / Telegram ids for avatars on details. */
   memberProfiles?: BillMemberProfile[];
   items: Item[];
+  /** Service / tax / tip / custom adjustments. */
+  charges?: BillCharge[];
 };

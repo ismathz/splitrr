@@ -206,3 +206,12 @@ export const v9UserDmAndPaymentDetails = `
 ALTER TABLE users ADD COLUMN dm_started_at TEXT;
 ALTER TABLE users ADD COLUMN payment_details TEXT;
 `;
+
+/**
+ * Persist charge labels + % rates so Mini App editor can round-trip
+ * service/tax/custom adjustments (amounts already lived in amount_cents).
+ */
+export const v10ChargesLabelAndRate = `
+ALTER TABLE charges ADD COLUMN label TEXT;
+ALTER TABLE charges ADD COLUMN rate_pct REAL;
+`;

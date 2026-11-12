@@ -1,13 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Camera01Icon,
-  File,
   FileEmpty01FreeIcons,
   ImageUploadIcon,
-  PlusSignIcon,
   Scan,
 } from "@hugeicons/core-free-icons";
 
@@ -27,6 +24,7 @@ import {
 } from "../billTypes";
 import { mockBills } from "../billDevMocks";
 import { isDevMockDataEnabled } from "@/lib/devFlags";
+import { pickReceiptImage } from "@/lib/pickReceiptImage";
 import {
   getGroupHistoryByTelegramChatId,
   getSplitbotApiBase,
@@ -94,9 +92,6 @@ export function HomeScreen() {
       launchCtx.currentUser?.id,
     ],
   );
-  const cameraInputRef = useRef<HTMLInputElement | null>(null);
-  const galleryInputRef = useRef<HTMLInputElement | null>(null);
-
   const [isSelecting, setIsSelecting] = useState(false);
   const [serverBills, setServerBills] = useState<BillDetails[] | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -149,6 +144,22 @@ export function HomeScreen() {
     navigate({ to: "/new-bill", search: { source: "scratch" } });
   };
 
+  const openReceiptPicker = async (source: "camera" | "gallery") => {
+    if (isSelecting) return;
+    setIsSelecting(true);
+    try {
+      const file = await pickReceiptImage(source);
+      if (!file) return;
+      navigate({
+        to: "/new-bill",
+        search: { source: "scan" },
+        state: { receiptFile: file },
+      });
+    } finally {
+      setIsSelecting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <Card className="border-dashed">
@@ -160,46 +171,11 @@ export function HomeScreen() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => {
-              setIsSelecting(false);
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              navigate({
-                to: "/new-bill",
-                search: { source: "scan" },
-                state: file ? { receiptFile: file } : undefined,
-              });
-            }}
-          />
-          <input
-            ref={galleryInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              setIsSelecting(false);
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              navigate({
-                to: "/new-bill",
-                search: { source: "scan" },
-                state: file ? { receiptFile: file } : undefined,
-              });
-            }}
-          />
-
           <Button
             className="w-full"
             disabled={isSelecting}
             onClick={() => {
-              setIsSelecting(true);
-              cameraInputRef.current?.click();
+              void openReceiptPicker("camera");
             }}
             size="lg"
           >
@@ -213,8 +189,7 @@ export function HomeScreen() {
               disabled={isSelecting}
               variant="outline"
               onClick={() => {
-                setIsSelecting(true);
-                galleryInputRef.current?.click();
+                void openReceiptPicker("gallery");
               }}
               size="lg"
             >
@@ -223,7 +198,7 @@ export function HomeScreen() {
                 strokeWidth={1.8}
                 className="size-5"
               />
-              Upload receipt
+              Upload photo
             </Button>
 
             <Button
