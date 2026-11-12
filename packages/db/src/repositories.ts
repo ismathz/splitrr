@@ -39,24 +39,47 @@ export class GroupRepository {
 
   findByTelegramChatId(
     chatId: string,
-  ): { id: number; title: string; member_count: number | null } | null {
-    return (
-      (this.db
-        .query(
-          `SELECT id, title, member_count
-           FROM groups
-           WHERE telegram_chat_id = ?1`,
-        )
-        .get(chatId) as
-        | { id: number; title: string; member_count: number | null }
-        | null) ?? null
-    );
+  ): {
+    id: number;
+    title: string;
+    member_count: number | null;
+    bot_is_admin: boolean | null;
+  } | null {
+    const row = this.db
+      .query(
+        `SELECT id, title, member_count, bot_is_admin
+         FROM groups
+         WHERE telegram_chat_id = ?1`,
+      )
+      .get(chatId) as
+      | {
+          id: number;
+          title: string;
+          member_count: number | null;
+          bot_is_admin: number | null;
+        }
+      | null;
+    if (!row) return null;
+    return {
+      id: row.id,
+      title: row.title,
+      member_count: row.member_count,
+      bot_is_admin:
+        row.bot_is_admin === 1 ? true : row.bot_is_admin === 0 ? false : null,
+    };
   }
 
   setMemberCount(groupId: number, memberCount: number): void {
     this.db
       .query(`UPDATE groups SET member_count = ?2 WHERE id = ?1`)
       .run(groupId, memberCount);
+  }
+
+  /** Persist whether @SplitrrBot is a group administrator (chat_member delivery). */
+  setBotIsAdmin(groupId: number, botIsAdmin: boolean): void {
+    this.db
+      .query(`UPDATE groups SET bot_is_admin = ?2 WHERE id = ?1`)
+      .run(groupId, botIsAdmin ? 1 : 0);
   }
 }
 
@@ -223,6 +246,143 @@ export class GroupRosterRepository {
       });
     }
     return out;
+  }
+}
+
+/** Telegram ChatMember-shaped JSON stored by @grammyjs/chat-members. */
+export type StoredChatMember = {
+  status: string;
+  user: {
+    id: number;
+    is_bot?: boolean;
+    username?: string;
+    first_name?: string;
+    last_name?: string;
+  };
+  is_member?: boolean;
+  [key: string]: unknown;
+};
+
+export function chatMemberStorageKey(
+  chatId: string | number,
+  userId: number | string,
+): string {
+  return `${chatId}_${userId}`;
+}
+
+export function parseChatMemberStorageKey(
+  key: string,
+): { chatId: string; userId: string } | null {
+  const idx = key.lastIndexOf("_");
+  if (idx <= 0 || idx === key.length - 1) return null;
+  return { chatId: key.slice(0, idx), userId: key.slice(idx + 1) };
+}
+
+/** True when the ChatMember is currently in the chat (not left/kicked/restricted-out). */
+export function chatMemberIsPresent(member: StoredChatMember): boolean {
+  if (member.status === "left" || member.status === "kicked") return false;
+  if (member.status === "restricted") return member.is_member === true;
+  return (
+    member.status === "member" ||
+    member.status === "administrator" ||
+    member.status === "creator"
+  );
+}
+
+/**
+ * Persistent storage for @grammyjs/chat-members, mirrored into group_members.
+ */
+export class ChatMemberCacheRepository {
+  constructor(
+    private readonly db: Database,
+    private readonly groups: GroupRepository,
+    private readonly roster: GroupRosterRepository,
+  ) {}
+
+  read(key: string): StoredChatMember | undefined {
+    const row = this.db
+      .query(
+        `SELECT member_json AS member_json
+         FROM chat_members_cache
+         WHERE cache_key = ?1`,
+      )
+      .get(key) as { member_json: string } | null;
+    if (!row?.member_json) return undefined;
+    try {
+      return JSON.parse(row.member_json) as StoredChatMember;
+    } catch {
+      return undefined;
+    }
+  }
+
+  write(key: string, member: StoredChatMember): void {
+    const parsed = parseChatMemberStorageKey(key);
+    const chatId = parsed?.chatId ?? "";
+    const userId = parsed?.userId ?? String(member.user?.id ?? "");
+    const status = member.status ?? "member";
+
+    this.db
+      .query(
+        `INSERT INTO chat_members_cache (
+           cache_key, telegram_chat_id, telegram_user_id, status, member_json, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
+         ON CONFLICT(cache_key) DO UPDATE SET
+           telegram_chat_id = excluded.telegram_chat_id,
+           telegram_user_id = excluded.telegram_user_id,
+           status = excluded.status,
+           member_json = excluded.member_json,
+           updated_at = datetime('now')`,
+      )
+      .run(key, chatId, userId, status, JSON.stringify(member));
+
+    this.syncRoster(chatId, member);
+  }
+
+  delete(key: string): void {
+    const existing = this.read(key);
+    const parsed = parseChatMemberStorageKey(key);
+    this.db
+      .query(`DELETE FROM chat_members_cache WHERE cache_key = ?1`)
+      .run(key);
+
+    const chatId = parsed?.chatId;
+    const userId =
+      parsed?.userId ??
+      (existing?.user?.id != null ? String(existing.user.id) : null);
+    if (!chatId || !userId) return;
+
+    const group = this.groups.findByTelegramChatId(chatId);
+    if (!group) return;
+    this.roster.removeByTelegramUserId(group.id, userId);
+  }
+
+  has(key: string): boolean {
+    const row = this.db
+      .query(`SELECT 1 AS ok FROM chat_members_cache WHERE cache_key = ?1`)
+      .get(key) as { ok: number } | null;
+    return Boolean(row?.ok);
+  }
+
+  /** Seed / refresh a ChatMember into cache + roster (admin backfill). */
+  upsertMember(
+    telegramChatId: string,
+    member: StoredChatMember,
+  ): void {
+    if (!member?.user?.id) return;
+    const key = chatMemberStorageKey(telegramChatId, member.user.id);
+    this.write(key, member);
+  }
+
+  private syncRoster(telegramChatId: string, member: StoredChatMember): void {
+    if (!telegramChatId || !member?.user?.id) return;
+    if (member.user.is_bot) return;
+
+    const groupId = this.groups.upsertGroup(telegramChatId, "Group");
+    if (chatMemberIsPresent(member)) {
+      this.roster.observeTelegramUser(groupId, member.user);
+    } else {
+      this.roster.removeByTelegramUserId(groupId, String(member.user.id));
+    }
   }
 }
 

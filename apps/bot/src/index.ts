@@ -1,9 +1,16 @@
-import { Bot, webhookCallback } from "grammy";
+import { chatMembers, type ChatMembersFlavor } from "@grammyjs/chat-members";
+import { Bot, type Context, webhookCallback } from "grammy";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
-import { createDb, GroupRepository, GroupRosterRepository } from "@splitbot/db";
+import {
+  ChatMemberCacheRepository,
+  createDb,
+  GroupRepository,
+  GroupRosterRepository
+} from "@splitbot/db";
 import { signAvatarRequest, verifyAvatarRequest } from "./avatarSignature";
+import { createChatMembersStorageAdapter } from "./chatMembersStorage";
 import { env } from "./env";
 import {
   ensureTelegramWebhook,
@@ -14,7 +21,7 @@ import {
 } from "./ensureTelegramWebhook";
 import {
   backfillGroupAdminsAndCount,
-  ingestChatMemberUpdate,
+  ingestMyChatMemberUpdate,
   ingestVisibleGroupUsers
 } from "./groupRoster";
 import { getSessionMembers, initMtcute, type TelegramGroupMember } from "./mtcuteClient";
@@ -36,34 +43,33 @@ import {
   type WidgetQueryUpdate
 } from "./widgets/handlers";
 
-const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
+type BotContext = Context & ChatMembersFlavor;
+
+const bot = new Bot<BotContext>(env.TELEGRAM_BOT_TOKEN);
 const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
 const roster = new GroupRosterRepository(db);
+const chatMemberCache = new ChatMemberCacheRepository(db, groups, roster);
+const chatMembersAdapter = createChatMembersStorageAdapter(chatMemberCache);
 
 console.log("[roster] SQLITE_PATH=", env.SQLITE_PATH);
 
+// grammY chat-members plugin: persists join/leave/status to SQLite and mirrors
+// into group_members. Requires chat_member in allowed_updates + bot admin.
+bot.use(chatMembers(chatMembersAdapter));
+
 // Persist every human sender the bot receives in groups (needs privacy OFF
-// for ordinary messages; chat_member needs admin + webhook allowed_updates).
+// for ordinary messages). chat_member joins/leaves are handled by the plugin.
 bot.use(async (ctx, next) => {
   try {
     ingestVisibleGroupUsers({ ctx, groups, roster });
-    if (ctx.chatMember) {
-      ingestChatMemberUpdate({ ctx, groups, roster });
+    if (ctx.myChatMember) {
+      ingestMyChatMemberUpdate({ ctx, groups });
     }
   } catch (err) {
     console.warn("[roster] ingest failed", err);
   }
   return next();
-});
-
-// Explicit handler so chat_member updates are acknowledged even if unused elsewhere.
-bot.on("chat_member", (ctx) => {
-  try {
-    ingestChatMemberUpdate({ ctx, groups, roster });
-  } catch (err) {
-    console.warn("[roster] chat_member ingest failed", err);
-  }
 });
 
 /** Prefer mtcute avatars but never drop SQLite-only message senders. */
@@ -259,7 +265,8 @@ bot.command("split", async (ctx) => {
       chatId: chat.id,
       groupId,
       groups,
-      roster
+      roster,
+      chatMemberCache
     });
 
     if (!hasDirectMiniAppLinkConfig() || !direct) {
@@ -473,10 +480,14 @@ app.post("/miniapp/group-members", async (c) => {
       : mtcuteMembers.length > 0
         ? "mtcute"
         : "roster";
+  const groupRow = groups.findByTelegramChatId(chatId);
+  const botIsAdmin = groupRow?.bot_is_admin ?? null;
   return c.json({
     members: toPublicMembers(merged, chatId),
     source,
     mtcuteError,
+    botIsAdmin,
+    botUsername: env.TELEGRAM_BOT_USERNAME,
     hint:
       merged.length === 0
         ? "empty_roster"

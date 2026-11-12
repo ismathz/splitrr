@@ -354,6 +354,10 @@ export type UseTelegramGroupMembersResult = {
   seenCount: number;
   /** max(0, memberCount - seenCount) when memberCount is known. */
   unseenCount: number | null;
+  /** Whether the bot is a group admin; null when unknown. */
+  botIsAdmin: boolean | null;
+  /** Hint when bot is not admin — joins won't be tracked until promoted. */
+  adminHint: string | null;
   status: RosterLoadStatus;
   /** Short reason for empty/error UI (auth, missing cid, …). */
   statusMessage: string | null;
@@ -387,6 +391,8 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
   const [memberCount, setMemberCount] = useState<number | null>(null);
   const [seenCount, setSeenCount] = useState(0);
   const [unseenCount, setUnseenCount] = useState<number | null>(null);
+  const [botIsAdmin, setBotIsAdmin] = useState<boolean | null>(null);
+  const [adminHint, setAdminHint] = useState<string | null>(null);
   const [status, setStatus] = useState<RosterLoadStatus>("loading");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
@@ -406,6 +412,8 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
       setSeenCount(sync.length);
       setMemberCount(null);
       setUnseenCount(null);
+      setBotIsAdmin(null);
+      setAdminHint(null);
       setIsLoading(false);
       if (!hasInitData) {
         setStatus("no_context");
@@ -442,6 +450,8 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
         let rosterMembers: TelegramGroupMember[] = [];
         let nextMemberCount: number | null = null;
         let nextUnseen: number | null = null;
+        let nextBotIsAdmin: boolean | null = null;
+        let nextAdminHint: string | null = null;
         let rosterStatus: RosterLoadStatus | null = null;
         let rosterMessage: string | null = null;
 
@@ -459,6 +469,14 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
             }));
             nextMemberCount = roster.memberCount;
             nextUnseen = roster.unseenCount;
+            nextBotIsAdmin =
+              typeof roster.botIsAdmin === "boolean" ? roster.botIsAdmin : null;
+            nextAdminHint =
+              typeof roster.adminHint === "string" && roster.adminHint.trim()
+                ? roster.adminHint.trim()
+                : nextBotIsAdmin === false
+                  ? `Make @${roster.botUsername?.trim() || "SplitrrBot"} an admin to see everyone who joins; others appear once they send a message`
+                  : null;
             if (!rosterMembers.length) {
               rosterStatus = "empty";
               rosterMessage =
@@ -510,6 +528,8 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
               ? Math.max(0, nextMemberCount - merged.length)
               : null,
         );
+        setBotIsAdmin(nextBotIsAdmin);
+        setAdminHint(nextAdminHint);
 
         if (merged.length > 0) {
           setStatus("ok");
@@ -534,6 +554,8 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
           setSeenCount(fallback.length);
           setMemberCount(null);
           setUnseenCount(null);
+          setBotIsAdmin(null);
+          setAdminHint(null);
           setStatus(fallback.length ? "ok" : "error");
           setStatusMessage(
             fallback.length
@@ -564,6 +586,8 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
     memberCount,
     seenCount,
     unseenCount,
+    botIsAdmin,
+    adminHint,
     status,
     statusMessage,
   };

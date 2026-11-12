@@ -3,7 +3,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDb, GroupRepository, GroupRosterRepository } from "@splitbot/db";
-import { ingestChatMemberUpdate, ingestVisibleGroupUsers } from "./groupRoster";
+import {
+  ingestChatMemberUpdate,
+  ingestMyChatMemberUpdate,
+  ingestVisibleGroupUsers
+} from "./groupRoster";
 
 describe("ingestVisibleGroupUsers", () => {
   it("records sender, newcomers, and removes leavers", () => {
@@ -129,5 +133,79 @@ describe("ingestChatMemberUpdate", () => {
     });
 
     expect(roster.listMembers(groupId)).toEqual([]);
+  });
+
+  it("keeps promoted administrators on the roster", () => {
+    const dir = mkdtempSync(join(tmpdir(), "splitbot-bot-roster-promote-"));
+    const db = createDb(join(dir, "test.db"));
+    const groups = new GroupRepository(db);
+    const roster = new GroupRosterRepository(db);
+    const chat = { id: -10078, type: "supergroup" as const, title: "Crew" };
+
+    ingestChatMemberUpdate({
+      ctx: {
+        chat,
+        chatMember: {
+          new_chat_member: {
+            status: "member",
+            user: { id: 5, first_name: "Pat", is_bot: false }
+          }
+        }
+      } as any,
+      groups,
+      roster
+    });
+
+    ingestChatMemberUpdate({
+      ctx: {
+        chat,
+        chatMember: {
+          old_chat_member: {
+            status: "member",
+            user: { id: 5, first_name: "Pat", is_bot: false }
+          },
+          new_chat_member: {
+            status: "administrator",
+            user: { id: 5, first_name: "Pat", is_bot: false }
+          }
+        }
+      } as any,
+      groups,
+      roster
+    });
+
+    const groupId = groups.findByTelegramChatId("-10078")!.id;
+    expect(roster.listMembers(groupId).map((m) => m.tgUserId)).toEqual([5]);
+  });
+});
+
+describe("ingestMyChatMemberUpdate", () => {
+  it("records bot admin promotion and demotion", () => {
+    const dir = mkdtempSync(join(tmpdir(), "splitbot-bot-my-cm-"));
+    const db = createDb(join(dir, "test.db"));
+    const groups = new GroupRepository(db);
+    const chat = { id: -10079, type: "supergroup" as const, title: "Crew" };
+
+    ingestMyChatMemberUpdate({
+      ctx: {
+        chat,
+        myChatMember: {
+          new_chat_member: { status: "administrator", user: { id: 1, is_bot: true } }
+        }
+      } as any,
+      groups
+    });
+    expect(groups.findByTelegramChatId("-10079")?.bot_is_admin).toBe(true);
+
+    ingestMyChatMemberUpdate({
+      ctx: {
+        chat,
+        myChatMember: {
+          new_chat_member: { status: "member", user: { id: 1, is_bot: true } }
+        }
+      } as any,
+      groups
+    });
+    expect(groups.findByTelegramChatId("-10079")?.bot_is_admin).toBe(false);
   });
 });

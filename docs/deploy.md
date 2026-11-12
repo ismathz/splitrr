@@ -89,7 +89,7 @@ Public URL: https://splitrr.ismath.dev (Cloudflare Tunnel via `cloudflared-split
 ## Telegram webhook
 The bot **re-registers the webhook on every boot** (`ensureTelegramWebhook`) with:
 
-`allowed_updates`: `message`, `edited_message`, `callback_query`, `my_chat_member`, `chat_member`
+`allowed_updates`: `message`, `edited_message`, `callback_query`, `my_chat_member`, `chat_member`, `widget_query`
 
 URL: `{origin(TELEGRAM_WEBAPP_URL)}/webhook/{TELEGRAM_WEBHOOK_SECRET}` + matching `secret_token`.
 
@@ -98,7 +98,7 @@ Default Telegram webhooks **omit** `chat_member`; without an explicit list, join
 ```bash
 curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
   -H 'Content-Type: application/json' \
-  -d "{\"url\":\"https://<host>/webhook/${TELEGRAM_WEBHOOK_SECRET}\",\"secret_token\":\"${TELEGRAM_WEBHOOK_SECRET}\",\"allowed_updates\":[\"message\",\"edited_message\",\"callback_query\",\"my_chat_member\",\"chat_member\"]}"
+  -d "{\"url\":\"https://<host>/webhook/${TELEGRAM_WEBHOOK_SECRET}\",\"secret_token\":\"${TELEGRAM_WEBHOOK_SECRET}\",\"allowed_updates\":[\"message\",\"edited_message\",\"callback_query\",\"my_chat_member\",\"chat_member\",\"widget_query\"]}"
 ```
 
 Confirm via bot `GET /health` → `webhook.rosterUpdatesOk` / `webhook.allowedUpdates`.
@@ -117,7 +117,7 @@ BotFather checklist:
 2. `/setcommands` (groups + default): `split`, `history`, `help` — remove `newbill`.
 3. Menu Button → same Mini App URL.
 4. Restart bot/API after changing `.env` (deploy does not overwrite `.env`).
-5. **Group roster fill (why “not everyone” shows):** Telegram Bot API has **no** full member list (`getChatAdministrators` + `getChatMemberCount` only). Splitrr stores who it can see: admins (on `/split` + API backfill), Mini App openers, join/leave the bot receives, command/message senders, and (when the bot is a group admin) MTProto `iterChatMembers` + `chat_member` webhook updates. **To list more people:** (a) BotFather → `/setprivacy` → **Disable** so ordinary group messages are visible and accumulate into the roster, and/or (b) make `@SplitrrBot` a **group admin** (enables fuller MTProto listing + `chat_member` joins). Re-run `/split` after either change. Re-register the webhook with `allowed_updates` including `chat_member` (see curl above). People still missing can always be added by name in the Mini App. No new env vars.
+5. **Group roster fill (why “not everyone” shows):** Telegram Bot API has **no** full member list (`getChatAdministrators` + `getChatMemberCount` only). Splitrr uses `@grammyjs/chat-members` with a SQLite adapter (`chat_members_cache` → `group_members`) plus admins (on `/split` + API backfill), Mini App openers, message senders, and optional MTProto `iterChatMembers`. **To list more people:** (a) BotFather → `/setprivacy` → **Disable** so ordinary group messages accumulate into the roster, and/or (b) make `@SplitrrBot` a **group admin** (required for `chat_member` join/leave updates + fuller MTProto listing). Re-run `/split` after either change. People still missing can always be added by name in the Mini App. No new env vars.
 6. **Shared SQLite:** `SQLITE_PATH` must be the **same absolute path** for `splitbot-api` and `splitbot-bot` (e.g. `/var/lib/splitbot/splitbot.db`). Relative `./data/splitbot.db` under different working directories creates two DBs and the Mini App will not see bot-side roster writes.
 
 ## Mini App build

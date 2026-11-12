@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import {
   createDb,
   BillSessionRepository,
+  ChatMemberCacheRepository,
   GroupRepository,
   GroupRosterRepository
 } from "@splitbot/db";
@@ -43,6 +44,7 @@ import { notifyNewlyAddedMembers } from "./widgets/notifyAdded";
 const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
 const roster = new GroupRosterRepository(db);
+const chatMemberCache = new ChatMemberCacheRepository(db, groups, roster);
 const sessions = new BillSessionRepository(db);
 
 /** Avoid hammering Telegram when many Mini App clients open the same group. */
@@ -1700,7 +1702,8 @@ app.get("/api/groups/by-telegram-chat/:telegramChatId/roster", async (c) => {
         telegramChatId,
         groupId,
         groups,
-        roster
+        roster,
+        chatMemberCache
       });
       backfillError = result.error;
       if (result.error) {
@@ -1722,6 +1725,12 @@ app.get("/api/groups/by-telegram-chat/:telegramChatId/roster", async (c) => {
       : null;
   const unseenCount =
     memberCount != null ? Math.max(0, memberCount - seenCount) : null;
+  const botIsAdmin = group?.bot_is_admin ?? null;
+  const botUsername = env.TELEGRAM_BOT_USERNAME;
+  const adminHint =
+    botIsAdmin === false
+      ? `Make @${botUsername} an admin to see everyone who joins; others appear once they send a message`
+      : null;
 
   return c.json({
     members: members.map((m) => ({
@@ -1733,6 +1742,9 @@ app.get("/api/groups/by-telegram-chat/:telegramChatId/roster", async (c) => {
     memberCount,
     seenCount,
     unseenCount,
+    botIsAdmin,
+    botUsername,
+    adminHint,
     backfillError: backfillError ?? null
   });
 });

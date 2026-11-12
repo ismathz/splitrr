@@ -354,6 +354,7 @@ export function BillEditor(props: BillEditorProps) {
     isLoading: groupMembersLoading,
     memberCount: groupMemberCount,
     unseenCount: groupUnseenCount,
+    adminHint: groupAdminHint,
     status: groupRosterStatus,
     statusMessage: groupRosterStatusMessage,
   } = useTelegramGroupMembers();
@@ -2413,6 +2414,11 @@ export function BillEditor(props: BillEditorProps) {
                 : null}
             </DrawerDescription>
           </DrawerHeader>
+          {groupAdminHint ? (
+            <p className="px-4 pb-2 text-sm text-muted-foreground">
+              {groupAdminHint}
+            </p>
+          ) : null}
           <div className="space-y-3 px-4 pb-2">
             <div className="flex gap-2">
               <label className="sr-only" htmlFor="manual-member-name">

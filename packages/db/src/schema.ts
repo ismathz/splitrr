@@ -215,3 +215,23 @@ export const v10ChargesLabelAndRate = `
 ALTER TABLE charges ADD COLUMN label TEXT;
 ALTER TABLE charges ADD COLUMN rate_pct REAL;
 `;
+
+/**
+ * grammY @grammyjs/chat-members persistent cache + whether the bot is a
+ * group admin (required for Telegram to deliver chat_member updates).
+ */
+export const v11ChatMembersPlugin = `
+CREATE TABLE IF NOT EXISTS chat_members_cache (
+  cache_key TEXT PRIMARY KEY,
+  telegram_chat_id TEXT NOT NULL,
+  telegram_user_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  member_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_members_cache_chat
+  ON chat_members_cache(telegram_chat_id);
+
+ALTER TABLE groups ADD COLUMN bot_is_admin INTEGER;
+`;

@@ -1,5 +1,11 @@
 import type { Api, Context } from "grammy";
-import type { GroupRepository, GroupRosterRepository } from "@splitbot/db";
+import type {
+  ChatMemberCacheRepository,
+  GroupRepository,
+  GroupRosterRepository,
+  StoredChatMember,
+} from "@splitbot/db";
+
 
 type TelegramUserLike = {
   id: number;
@@ -67,8 +73,8 @@ export function ingestVisibleGroupUsers(input: {
 
 /**
  * Record join/leave/status changes from `chat_member` updates.
- * Requires webhook `allowed_updates` to include `chat_member` and the bot
- * must be a group administrator — otherwise Telegram never sends these.
+ * Prefer the @grammyjs/chat-members plugin + SQLite adapter in production;
+ * this remains for tests / fallback dual-write.
  */
 export function ingestChatMemberUpdate(input: {
   ctx: Context;
@@ -95,6 +101,13 @@ export function ingestChatMemberUpdate(input: {
     roster.removeByTelegramUserId(groupId, String(user.id));
     return;
   }
+  if (status === "restricted") {
+    const restricted = update.new_chat_member as { is_member?: boolean };
+    if (!restricted.is_member) {
+      roster.removeByTelegramUserId(groupId, String(user.id));
+      return;
+    }
+  }
   // member | administrator | creator | restricted (still in chat)
   if (
     status === "member" ||
@@ -107,8 +120,33 @@ export function ingestChatMemberUpdate(input: {
 }
 
 /**
- * Backfill chat administrators into the stored roster and refresh member_count.
- * Call on `/split` in groups — Bot API cannot list all members.
+ * Track whether this bot is a group admin from `my_chat_member` updates.
+ * Telegram only delivers `chat_member` (other users) when the bot is admin.
+ */
+export function ingestMyChatMemberUpdate(input: {
+  ctx: Context;
+  groups: GroupRepository;
+}): void {
+  const { ctx, groups } = input;
+  const chat = ctx.chat;
+  if (!isGroupChat(chat)) return;
+
+  const update = ctx.myChatMember;
+  if (!update?.new_chat_member) return;
+
+  const groupId = groups.upsertGroup(
+    String(chat.id),
+    "title" in chat ? (chat.title ?? "Untitled group") : "Untitled group",
+  );
+  const status = update.new_chat_member.status;
+  const isAdmin = status === "administrator" || status === "creator";
+  groups.setBotIsAdmin(groupId, isAdmin);
+}
+
+/**
+ * Backfill chat administrators into the stored roster / chat-members cache
+ * and refresh member_count + bot_is_admin. Call on `/split` in groups —
+ * Bot API cannot list all members.
  */
 export async function backfillGroupAdminsAndCount(input: {
   api: Api;
@@ -116,15 +154,38 @@ export async function backfillGroupAdminsAndCount(input: {
   groupId: number;
   groups: GroupRepository;
   roster: GroupRosterRepository;
+  chatMemberCache?: ChatMemberCacheRepository;
 }): Promise<void> {
-  const { api, chatId, groupId, groups, roster } = input;
+  const { api, chatId, groupId, groups, roster, chatMemberCache } = input;
+  const telegramChatId = String(chatId);
+
+  let botId: number | null = null;
+  try {
+    const me = await api.getMe();
+    botId = me.id;
+  } catch (err) {
+    console.warn("[roster] getMe failed", chatId, err);
+  }
 
   try {
     const admins = await api.getChatAdministrators(chatId);
+    let botIsAdmin = false;
     for (const member of admins) {
       const user = member.user;
-      if (!user || user.is_bot) continue;
+      if (!user) continue;
+      if (botId != null && user.id === botId) {
+        botIsAdmin =
+          member.status === "administrator" || member.status === "creator";
+      }
+      if (user.is_bot) continue;
       roster.observeTelegramUser(groupId, user);
+      chatMemberCache?.upsertMember(
+        telegramChatId,
+        member as unknown as StoredChatMember,
+      );
+    }
+    if (botId != null) {
+      groups.setBotIsAdmin(groupId, botIsAdmin);
     }
   } catch (err) {
     console.warn("[roster] getChatAdministrators failed", chatId, err);

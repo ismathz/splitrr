@@ -6,6 +6,7 @@
     "dev": "bun run src/index.ts"
   },
   "dependencies": {
+    "@grammyjs/chat-members": "1.2.0",
     "@hono/node-server": "latest",
     "@mtcute/bun": "0.29.4",
     "@splitbot/db": "workspace:*",
