@@ -7,7 +7,8 @@ import {
   BillSessionRepository,
   ChatMemberCacheRepository,
   GroupRepository,
-  GroupRosterRepository
+  GroupRosterRepository,
+  parsePlaceholderInput
 } from "@splitbot/db";
 import type { ParsedReceipt } from "@splitbot/shared";
 import { inferOcrCharges } from "./ocrCharges";
@@ -22,6 +23,7 @@ import { computeSettlementTransfers } from "./settlement";
 import {
   authorizeBillAnnounce,
   buildBillAnnounceOpenUrl,
+  buildBillAnnounceReplyMarkup,
   formatBillAnnounceMessage,
   type BillAnnounceRow
 } from "./announce";
@@ -1046,19 +1048,43 @@ app.patch("/api/bills/:billId", async (c) => {
       billId
     );
     const insertMember = db.query(
-      `INSERT OR IGNORE INTO bill_session_members (id, bill_session_id, member_name)
-       VALUES (?1, ?2, ?3)`
+      `INSERT OR IGNORE INTO bill_session_members (
+         id, bill_session_id, member_name, is_placeholder, placeholder_username
+       ) VALUES (?1, ?2, ?3, ?4, ?5)`
     );
+    const rosterNames = new Set<string>();
+    const rosterUsernames = new Set<string>();
+    if (groupId != null) {
+      for (const m of roster.listMembers(groupId)) {
+        rosterNames.add(m.name.trim().toLowerCase());
+        if (m.username?.trim()) {
+          rosterUsernames.add(m.username.trim().toLowerCase().replace(/^@/, ""));
+        }
+      }
+    }
     const seen = new Set<string>();
     const nextMembers: string[] = [];
     for (const raw of body.members) {
-      const memberName = raw.trim();
+      const parsed = parsePlaceholderInput(raw);
+      const memberName = parsed.memberName;
       if (!memberName) continue;
       const key = memberName.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
       nextMembers.push(memberName);
-      insertMember.run(randomUUID(), billId, memberName);
+
+      const onRoster =
+        rosterNames.has(memberName.toLowerCase()) ||
+        (parsed.placeholderUsername != null &&
+          rosterUsernames.has(parsed.placeholderUsername));
+      const isPlaceholder = !onRoster;
+      insertMember.run(
+        randomUUID(),
+        billId,
+        memberName,
+        isPlaceholder ? 1 : 0,
+        isPlaceholder ? parsed.placeholderUsername : null
+      );
       // Keep synthetic users + group roster in sync for settlements/export.
       const userId = resolveNamedUserId(memberName);
       if (userId != null && groupId != null) {
@@ -1081,13 +1107,28 @@ app.patch("/api/bills/:billId", async (c) => {
         "DELETE FROM bill_session_members WHERE bill_session_id = ?1"
       ).run(billId);
       const insertMember = db.query(
-        `INSERT OR IGNORE INTO bill_session_members (id, bill_session_id, member_name)
-         VALUES (?1, ?2, ?3)`
+        `INSERT OR IGNORE INTO bill_session_members (
+           id, bill_session_id, member_name, is_placeholder, placeholder_username
+         ) VALUES (?1, ?2, ?3, ?4, ?5)`
+      );
+      const rosterNames = new Set(
+        groupId != null
+          ? roster.listMembers(groupId).map((m) => m.name.trim().toLowerCase())
+          : [],
       );
       const nextMembers: string[] = [];
       for (const memberName of derived) {
         nextMembers.push(memberName);
-        insertMember.run(randomUUID(), billId, memberName);
+        const parsed = parsePlaceholderInput(memberName);
+        const onRoster = rosterNames.has(memberName.trim().toLowerCase());
+        const isPlaceholder = !onRoster;
+        insertMember.run(
+          randomUUID(),
+          billId,
+          memberName,
+          isPlaceholder ? 1 : 0,
+          isPlaceholder ? parsed.placeholderUsername : null,
+        );
       }
       memberCountForStatus = derived.size;
       nextMembersForNotify = nextMembers;
@@ -1204,6 +1245,7 @@ app.post("/api/bills/:billId/announce", async (c) => {
     openUrl,
     people
   });
+  const replyMarkup = buildBillAnnounceReplyMarkup({ openUrl });
 
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -1213,7 +1255,8 @@ app.post("/api/bills/:billId/announce", async (c) => {
         chat_id: bill.telegramChatId,
         text,
         parse_mode: "HTML",
-        disable_web_page_preview: true
+        disable_web_page_preview: true,
+        reply_markup: replyMarkup
       })
     });
     if (!res.ok) {

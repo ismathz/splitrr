@@ -235,3 +235,21 @@ CREATE INDEX IF NOT EXISTS idx_chat_members_cache_chat
 
 ALTER TABLE groups ADD COLUMN bot_is_admin INTEGER;
 `;
+
+/**
+ * Self-registration join card (live-edited roster message) + bill placeholders
+ * for people added by name/@username before they tap Join.
+ */
+export const v12GroupJoinOnboarding = `
+CREATE TABLE IF NOT EXISTS group_join_cards (
+  group_id INTEGER PRIMARY KEY,
+  telegram_chat_id TEXT NOT NULL,
+  message_id INTEGER NOT NULL,
+  last_edit_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+);
+
+ALTER TABLE bill_session_members ADD COLUMN is_placeholder INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bill_session_members ADD COLUMN placeholder_username TEXT;
+`;

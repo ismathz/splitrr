@@ -247,6 +247,89 @@ export class GroupRosterRepository {
     }
     return out;
   }
+
+  /** True when a real (non-synthetic) Telegram user is already on the roster. */
+  isMember(groupId: number, telegramUserId: string | number): boolean {
+    const row = this.db
+      .query(
+        `SELECT 1 AS ok
+         FROM group_members gm
+         JOIN users u ON u.id = gm.user_id
+         WHERE gm.group_id = ?1
+           AND u.telegram_user_id = ?2
+         LIMIT 1`,
+      )
+      .get(groupId, String(telegramUserId)) as { ok: number } | null;
+    return Boolean(row?.ok);
+  }
+}
+
+export type GroupJoinCard = {
+  groupId: number;
+  telegramChatId: string;
+  messageId: number;
+  lastEditAt: string | null;
+};
+
+/** Persist the live-edited group join card message id for throttled edits. */
+export class GroupJoinCardRepository {
+  constructor(private readonly db: Database) {}
+
+  upsert(input: {
+    groupId: number;
+    telegramChatId: string;
+    messageId: number;
+  }): void {
+    this.db
+      .query(
+        `INSERT INTO group_join_cards (group_id, telegram_chat_id, message_id, last_edit_at, created_at)
+         VALUES (?1, ?2, ?3, NULL, datetime('now'))
+         ON CONFLICT(group_id) DO UPDATE SET
+           telegram_chat_id = excluded.telegram_chat_id,
+           message_id = excluded.message_id`,
+      )
+      .run(input.groupId, input.telegramChatId, input.messageId);
+  }
+
+  findByGroupId(groupId: number): GroupJoinCard | null {
+    const row = this.db
+      .query(
+        `SELECT group_id, telegram_chat_id, message_id, last_edit_at
+         FROM group_join_cards
+         WHERE group_id = ?1`,
+      )
+      .get(groupId) as
+      | {
+          group_id: number;
+          telegram_chat_id: string;
+          message_id: number;
+          last_edit_at: string | null;
+        }
+      | null;
+    if (!row) return null;
+    return {
+      groupId: row.group_id,
+      telegramChatId: row.telegram_chat_id,
+      messageId: row.message_id,
+      lastEditAt: row.last_edit_at,
+    };
+  }
+
+  markEdited(groupId: number, atIso: string = new Date().toISOString()): void {
+    this.db
+      .query(
+        `UPDATE group_join_cards
+         SET last_edit_at = ?2
+         WHERE group_id = ?1`,
+      )
+      .run(groupId, atIso);
+  }
+
+  delete(groupId: number): void {
+    this.db
+      .query(`DELETE FROM group_join_cards WHERE group_id = ?1`)
+      .run(groupId);
+  }
 }
 
 /** Telegram ChatMember-shaped JSON stored by @grammyjs/chat-members. */

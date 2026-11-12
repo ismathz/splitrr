@@ -6,6 +6,7 @@ import { serve } from "@hono/node-server";
 import {
   ChatMemberCacheRepository,
   createDb,
+  GroupJoinCardRepository,
   GroupRepository,
   GroupRosterRepository
 } from "@splitbot/db";
@@ -19,6 +20,13 @@ import {
   webhookAllowsRosterUpdates,
   type WebhookInfoSummary
 } from "./ensureTelegramWebhook";
+import {
+  appendJoinButtonToMarkup,
+  handleBotMembershipForJoinCard,
+  refreshGroupJoinCard,
+  registerGroupJoiner,
+  ROSTER_JOIN_CALLBACK
+} from "./groupJoinOnboarding";
 import {
   backfillGroupAdminsAndCount,
   ingestMyChatMemberUpdate,
@@ -49,6 +57,7 @@ const bot = new Bot<BotContext>(env.TELEGRAM_BOT_TOKEN);
 const db = createDb(env.SQLITE_PATH);
 const groups = new GroupRepository(db);
 const roster = new GroupRosterRepository(db);
+const joinCards = new GroupJoinCardRepository(db);
 const chatMemberCache = new ChatMemberCacheRepository(db, groups, roster);
 const chatMembersAdapter = createChatMembersStorageAdapter(chatMemberCache);
 
@@ -65,11 +74,66 @@ bot.use(async (ctx, next) => {
     ingestVisibleGroupUsers({ ctx, groups, roster });
     if (ctx.myChatMember) {
       ingestMyChatMemberUpdate({ ctx, groups });
+      await handleBotMembershipForJoinCard({
+        ctx,
+        groups,
+        roster,
+        joinCards,
+        botUsername: env.TELEGRAM_BOT_USERNAME
+      });
     }
   } catch (err) {
     console.warn("[roster] ingest failed", err);
   }
   return next();
+});
+
+async function refreshJoinCardAfterRegister(telegramChatId: string): Promise<void> {
+  const group = groups.findByTelegramChatId(telegramChatId);
+  if (!group) return;
+  await refreshGroupJoinCard({
+    api: bot.api,
+    groups,
+    roster,
+    joinCards,
+    groupId: group.id,
+    botUsername: env.TELEGRAM_BOT_USERNAME
+  });
+}
+
+bot.callbackQuery(ROSTER_JOIN_CALLBACK, async (ctx) => {
+  const chat = ctx.chat;
+  const from = ctx.from;
+  if (!chat || !from || (chat.type !== "group" && chat.type !== "supergroup")) {
+    await ctx.answerCallbackQuery({
+      text: "Use Join in the group chat.",
+      show_alert: false
+    });
+    return;
+  }
+
+  const result = registerGroupJoiner({
+    db,
+    groups,
+    roster,
+    telegramChatId: String(chat.id),
+    chatTitle: "title" in chat ? chat.title : undefined,
+    user: from
+  });
+
+  if (!result) {
+    await ctx.answerCallbackQuery({ text: "Could not join.", show_alert: false });
+    return;
+  }
+
+  await ctx.answerCallbackQuery({
+    text: result.alreadyJoined ? "Already joined" : "You're in!",
+    show_alert: false
+  });
+
+  if (!result.alreadyJoined || result.claimedMemberNames.length > 0) {
+    await refreshJoinCardAfterRegister(String(chat.id));
+  }
 });
 
 /** Prefer mtcute avatars but never drop SQLite-only message senders. */
@@ -238,8 +302,51 @@ bot.command("paydetails", async (ctx) => {
 
 bot.command("help", async (ctx) => {
   await ctx.reply(
-    "Commands:\n/split - open Splitrr Mini App\n/balance - your balance card (DM)\n/paydetails - store payment copy-text (DM)\n/history - latest bills\n/help - this message"
+    "Commands:\n/split - open Splitrr Mini App\n/join - join bill splitting in this group\n/balance - your balance card (DM)\n/paydetails - store payment copy-text (DM)\n/history - latest bills\n/help - this message"
   );
+});
+
+bot.command("join", async (ctx) => {
+  const chat = ctx.chat;
+  const from = ctx.from;
+  if (!chat || !from || (chat.type !== "group" && chat.type !== "supergroup")) {
+    await ctx.reply("Use /join inside a group where Splitrr is present.");
+    return;
+  }
+
+  const result = registerGroupJoiner({
+    db,
+    groups,
+    roster,
+    telegramChatId: String(chat.id),
+    chatTitle: "title" in chat ? chat.title : undefined,
+    user: from
+  });
+
+  const text = !result
+    ? "Could not join."
+    : result.alreadyJoined
+      ? "Already joined."
+      : "You're in!";
+
+  // Prefer deleting the command so the chat stays quiet (needs delete rights).
+  let deleted = false;
+  if (ctx.message?.message_id != null) {
+    try {
+      await ctx.api.deleteMessage(chat.id, ctx.message.message_id);
+      deleted = true;
+    } catch {
+      deleted = false;
+    }
+  }
+
+  if (!deleted) {
+    await ctx.reply(text);
+  }
+
+  if (result && (!result.alreadyJoined || result.claimedMemberNames.length > 0)) {
+    await refreshJoinCardAfterRegister(String(chat.id));
+  }
 });
 
 bot.command("split", async (ctx) => {
@@ -269,6 +376,18 @@ bot.command("split", async (ctx) => {
       chatMemberCache
     });
 
+    // Self-register the /split issuer so they appear in add-members immediately.
+    if (ctx.from) {
+      registerGroupJoiner({
+        db,
+        groups,
+        roster,
+        telegramChatId: String(chat.id),
+        chatTitle: "title" in chat ? chat.title : undefined,
+        user: ctx.from
+      });
+    }
+
     if (!hasDirectMiniAppLinkConfig() || !direct) {
       await ctx.reply(
         `Cannot open Splitrr in this group yet.\n${DEEP_LINK_SETUP_HINT}`
@@ -276,16 +395,18 @@ bot.command("split", async (ctx) => {
       return;
     }
 
+    const openMarkup = buildOpenMiniAppReplyMarkup({
+      chatType: chat.type,
+      miniUrl,
+      directUrl: direct
+    });
     await ctx.reply(
       "Open Splitrr to create or continue a bill for this chat.",
       {
-        reply_markup: buildOpenMiniAppReplyMarkup({
-          chatType: chat.type,
-          miniUrl,
-          directUrl: direct
-        })
+        reply_markup: appendJoinButtonToMarkup(openMarkup)
       }
     );
+    await refreshJoinCardAfterRegister(String(chat.id));
     return;
   }
 

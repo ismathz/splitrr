@@ -48,13 +48,34 @@ export function resolveAnnouncePeople(
 
   const stored = db
     .query(
-      `SELECT member_name
+      `SELECT member_name,
+              is_placeholder AS is_placeholder,
+              placeholder_username AS placeholder_username
        FROM bill_session_members
        WHERE bill_session_id = ?1
        ORDER BY created_at ASC`
     )
-    .all(billId) as Array<{ member_name: string }>;
-  for (const row of stored) pushName(row.member_name);
+    .all(billId) as Array<{
+    member_name: string;
+    is_placeholder: number | null;
+    placeholder_username: string | null;
+  }>;
+  const placeholderByName = new Map<
+    string,
+    { isPlaceholder: boolean; username: string | null }
+  >();
+  for (const row of stored) {
+    pushName(row.member_name);
+    const key = normalizeKey(row.member_name);
+    const flagged =
+      row.is_placeholder === 1 ||
+      Boolean(row.placeholder_username?.trim()) ||
+      row.member_name.trim().startsWith("@");
+    placeholderByName.set(key, {
+      isPlaceholder: flagged,
+      username: row.placeholder_username?.trim() || null
+    });
+  }
 
   const assignees = db
     .query(
@@ -108,15 +129,25 @@ export function resolveAnnouncePeople(
 
   const people: AnnouncePerson[] = [];
   for (const name of memberNames) {
-    const matched = byKey.get(normalizeKey(name));
+    const key = normalizeKey(name);
+    const matched = byKey.get(key);
+    const placeholderMeta = placeholderByName.get(key);
     if (matched) {
       people.push({
         displayName: name,
         username: matched.username,
-        telegramUserId: matched.telegramUserId
+        telegramUserId: matched.telegramUserId,
+        isPlaceholder: false
       });
     } else {
-      people.push({ displayName: name });
+      const usernameFromName = name.trim().startsWith("@")
+        ? name.trim().replace(/^@/, "")
+        : null;
+      people.push({
+        displayName: name,
+        username: placeholderMeta?.username || usernameFromName,
+        isPlaceholder: placeholderMeta?.isPlaceholder ?? true
+      });
     }
   }
   return people;

@@ -83,4 +83,16 @@ describe("GroupRosterRepository", () => {
     groups.setBotIsAdmin(groupId, false);
     expect(groups.findByTelegramChatId("-1001")?.bot_is_admin).toBe(false);
   });
+
+  it("reports isMember for observed users", () => {
+    const dir = mkdtempSync(join(tmpdir(), "splitbot-roster-ismember-"));
+    const db = createDb(join(dir, "test.db"));
+    const groups = new GroupRepository(db);
+    const roster = new GroupRosterRepository(db);
+    const groupId = groups.upsertGroup("-9", "G");
+    expect(roster.isMember(groupId, 3)).toBe(false);
+    roster.observeTelegramUser(groupId, { id: 3, first_name: "Pat" });
+    expect(roster.isMember(groupId, 3)).toBe(true);
+    expect(roster.isMember(groupId, "3")).toBe(true);
+  });
 });

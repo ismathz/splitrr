@@ -26,6 +26,8 @@ export type AnnouncePerson = {
   username?: string | null;
   /** Numeric Telegram user id when known (for tg:// mentions). */
   telegramUserId?: number | null;
+  /** True when the person was added before self-registering via Join. */
+  isPlaceholder?: boolean;
 };
 
 /**
@@ -95,6 +97,15 @@ export function formatAnnouncePersonMention(person: AnnouncePerson): string {
   return escapeHtml(name);
 }
 
+/** Label used in “Waiting on … to join” for placeholders. */
+export function formatWaitingOnLabel(person: AnnouncePerson): string {
+  const username = person.username?.trim().replace(/^@/, "") ?? "";
+  if (username) return `@${username}`;
+  const name = person.displayName.trim();
+  if (name.startsWith("@")) return name;
+  return name || "someone";
+}
+
 export function formatBillAnnounceMessage(
   bill: BillAnnounceRow,
   extras?: {
@@ -105,9 +116,15 @@ export function formatBillAnnounceMessage(
   }
 ): string {
   const people = (extras?.people ?? []).filter((p) => p.displayName.trim());
+  const joined = people.filter((p) => !p.isPlaceholder);
+  const waiting = people.filter((p) => p.isPlaceholder);
   const peopleLine =
-    people.length > 0
-      ? `With: ${people.map(formatAnnouncePersonMention).join(", ")}`
+    joined.length > 0
+      ? `With: ${joined.map(formatAnnouncePersonMention).join(", ")}`
+      : null;
+  const waitingLine =
+    waiting.length > 0
+      ? `Waiting on ${waiting.map(formatWaitingOnLabel).join(", ")} to join`
       : null;
 
   const lines = [
@@ -115,6 +132,7 @@ export function formatBillAnnounceMessage(
     bill.place ? `Place: ${escapeHtml(bill.place)}` : null,
     `Date: ${formatAnnounceBillDate(bill.billDate)}`,
     peopleLine,
+    waitingLine,
     typeof extras?.itemCount === "number"
       ? `Items: ${extras.itemCount}`
       : null,
@@ -125,6 +143,40 @@ export function formatBillAnnounceMessage(
   ].filter((line): line is string => Boolean(line));
 
   return lines.join("\n");
+}
+
+/** Inline keyboard for shared bill messages: Join & claim + optional Open. */
+export function buildBillAnnounceReplyMarkup(input: {
+  openUrl?: string | null;
+  joinCallbackData?: string;
+  joinButtonText?: string;
+}):
+  | {
+      inline_keyboard: Array<
+        Array<
+          | { text: string; callback_data: string }
+          | { text: string; url: string }
+        >
+      >;
+    }
+  | undefined {
+  const rows: Array<
+    Array<
+      | { text: string; callback_data: string }
+      | { text: string; url: string }
+    >
+  > = [];
+  const joinData = input.joinCallbackData ?? "roster_join";
+  rows.push([
+    {
+      text: input.joinButtonText ?? "Join & claim my items",
+      callback_data: joinData
+    }
+  ]);
+  if (input.openUrl) {
+    rows.push([{ text: "Open bill", url: input.openUrl }]);
+  }
+  return { inline_keyboard: rows };
 }
 
 export function buildBillAnnounceOpenUrl(input: {

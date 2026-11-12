@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   authorizeBillAnnounce,
   buildBillAnnounceOpenUrl,
+  buildBillAnnounceReplyMarkup,
   formatAnnounceBillDate,
   formatAnnouncePersonMention,
   formatBillAnnounceMessage,
@@ -130,6 +131,36 @@ describe("formatBillAnnounceMessage", () => {
     expect(text).toContain("USD 12.50");
     expect(text).toContain("Items: 3");
     expect(text).toContain("https://t.me/SplitrrBot/app?startapp=x");
+  });
+
+  it("lists placeholders under Waiting on … to join", () => {
+    const text = formatBillAnnounceMessage(bill, {
+      people: [
+        { displayName: "Ada", username: "ada" },
+        {
+          displayName: "@cara",
+          username: "cara",
+          isPlaceholder: true
+        }
+      ]
+    });
+    expect(text).toContain("With: @ada");
+    expect(text).toContain("Waiting on @cara to join");
+  });
+});
+
+describe("buildBillAnnounceReplyMarkup", () => {
+  it("adds Join & claim plus Open bill when url is present", () => {
+    expect(
+      buildBillAnnounceReplyMarkup({
+        openUrl: "https://t.me/SplitrrBot/app?startapp=x"
+      })
+    ).toEqual({
+      inline_keyboard: [
+        [{ text: "Join & claim my items", callback_data: "roster_join" }],
+        [{ text: "Open bill", url: "https://t.me/SplitrrBot/app?startapp=x" }]
+      ]
+    });
   });
 });
 

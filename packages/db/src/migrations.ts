@@ -12,6 +12,7 @@ import {
   v9UserDmAndPaymentDetails,
   v10ChargesLabelAndRate,
   v11ChatMembersPlugin,
+  v12GroupJoinOnboarding,
 } from "./schema";
 
 const orderedMigrations: Array<{ name: string; sql: string }> = [
@@ -40,6 +41,10 @@ const orderedMigrations: Array<{ name: string; sql: string }> = [
   {
     name: "011_chat_members_plugin.sql",
     sql: v11ChatMembersPlugin,
+  },
+  {
+    name: "012_group_join_onboarding.sql",
+    sql: v12GroupJoinOnboarding,
   },
 ];
 

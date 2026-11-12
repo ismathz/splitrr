@@ -2365,12 +2365,12 @@ export function BillEditor(props: BillEditorProps) {
           <DrawerHeader>
             <DrawerTitle>Bill members</DrawerTitle>
             <DrawerDescription>
-              Choose who can be assigned to line items. Add missing people by
-              name if they aren't in the roster yet.
+              Choose who can be assigned to line items. Add someone by name or
+              @username as a placeholder if they haven't tapped Join yet.
               {groupUnseenCount != null && groupUnseenCount > 0
                 ? ` About ${groupUnseenCount} group member${
                     groupUnseenCount === 1 ? "" : "s"
-                  } not listed yet — add them by name above.`
+                  } not listed yet — add them by name or @username above.`
                 : null}
               {groupRosterStatusMessage &&
               groupMembers.length > 0 &&
@@ -2387,7 +2387,7 @@ export function BillEditor(props: BillEditorProps) {
           <div className="space-y-3 px-4 pb-2">
             <div className="flex gap-2">
               <label className="sr-only" htmlFor="manual-member-name">
-                Add member by name
+                Add member by name or @username
               </label>
               <input
                 id="manual-member-name"
@@ -2402,7 +2402,7 @@ export function BillEditor(props: BillEditorProps) {
                     addManualMember();
                   }
                 }}
-                placeholder="Add someone by name…"
+                placeholder="Add by name or @username…"
                 className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
               <Button
@@ -2419,7 +2419,7 @@ export function BillEditor(props: BillEditorProps) {
             {manualOnlyBillMembers.length > 0 ? (
               <div className="space-y-1">
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Added manually
+                  Waiting to join
                 </div>
                 {manualOnlyBillMembers.map((member) => {
                   const checked = billMembers.includes(member);
@@ -2442,7 +2442,12 @@ export function BillEditor(props: BillEditorProps) {
                             memberByName.get(member),
                           )}
                         />
-                        <span className="truncate">{member}</span>
+                        <span className="min-w-0 flex-1 truncate">
+                          <span className="truncate">{member}</span>
+                          <span className="mt-0.5 block text-xs text-muted-foreground">
+                            Waiting on {member} to join
+                          </span>
+                        </span>
                       </span>
                       <Checkbox
                         id={id}
