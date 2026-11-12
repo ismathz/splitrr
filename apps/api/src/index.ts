@@ -3,11 +3,13 @@ import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { randomUUID } from "node:crypto";
 import {
+  buildBotStartDeepLink,
   createDb,
   BillSessionRepository,
   ChatMemberCacheRepository,
   GroupRepository,
   GroupRosterRepository,
+  listUndeliveredPendingForBill,
   parsePlaceholderInput
 } from "@splitbot/db";
 import type { ParsedReceipt } from "@splitbot/shared";
@@ -1157,16 +1159,20 @@ app.patch("/api/bills/:billId", async (c) => {
   }
 
   if (nextMembersForNotify) {
-    // Fire-and-forget DM widgets; do not block the save response.
-    void notifyNewlyAddedMembers({
-      db,
-      botToken: env.TELEGRAM_BOT_TOKEN,
-      billId,
-      previousMembers,
-      nextMembers: nextMembersForNotify,
-      botUsername: env.TELEGRAM_BOT_USERNAME,
-      miniAppShortName: env.TELEGRAM_MINI_APP_SHORT_NAME,
-    }).catch((err) => console.warn("[widgets] notify added", err));
+    // Await so pending undeliverable rows exist before a subsequent share/announce.
+    try {
+      await notifyNewlyAddedMembers({
+        db,
+        botToken: env.TELEGRAM_BOT_TOKEN,
+        billId,
+        previousMembers,
+        nextMembers: nextMembersForNotify,
+        botUsername: env.TELEGRAM_BOT_USERNAME,
+        miniAppShortName: env.TELEGRAM_MINI_APP_SHORT_NAME,
+      });
+    } catch (err) {
+      console.warn("[widgets] notify added", err);
+    }
   }
 
   return c.json({ ok: true });
@@ -1238,12 +1244,29 @@ app.post("/api/bills/:billId/announce", async (c) => {
   });
 
   const people = resolveAnnouncePeople(db, billId);
+  const pendingAdded = listUndeliveredPendingForBill(db, billId);
+  const startNudge =
+    pendingAdded.length > 0
+      ? {
+          labels: pendingAdded.map((row) => {
+            const username = row.member_name.trim().startsWith("@")
+              ? row.member_name.trim()
+              : null;
+            return username || row.member_name.trim();
+          }),
+          startLink: buildBotStartDeepLink(
+            env.TELEGRAM_BOT_USERNAME,
+            pendingAdded[0]!.start_payload,
+          ),
+        }
+      : null;
 
   const text = formatBillAnnounceMessage(bill, {
     itemCount: Number(totals.itemCount) || 0,
     totalCents: Number(totals.totalCents) || 0,
     openUrl,
-    people
+    people,
+    startNudge,
   });
   const replyMarkup = buildBillAnnounceReplyMarkup({ openUrl });
 

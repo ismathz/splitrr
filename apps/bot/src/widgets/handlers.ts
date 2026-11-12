@@ -86,7 +86,7 @@ export async function sendAddedWidget(input: {
   memberName: string;
   botUsername: string;
   miniAppShortName: string;
-}): Promise<{ mode: "widget" | "text"; error?: string }> {
+}): Promise<{ mode: "widget" | "text"; messageId?: number; error?: string }> {
   const data = buildAddedChatData(input.db, {
     billId: input.billId,
     memberName: input.memberName,

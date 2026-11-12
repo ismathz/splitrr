@@ -44,6 +44,7 @@ import {
   parseTelegramUserFromInitData,
   validateWebAppInitData
 } from "./telegramWebAppAuth";
+import { deliverPendingAddedCards } from "./widgets/deliverPendingAdded";
 import {
   handleWidgetQuery,
   markDmStarted,
@@ -223,6 +224,16 @@ bot.command("start", async (ctx) => {
 
   if (chat?.type === "private" && ctx.from) {
     markDmStarted(db, ctx.from);
+    const startArg = (ctx.match ?? "").toString().trim();
+    await deliverPendingAddedCards({
+      db,
+      botToken: env.TELEGRAM_BOT_TOKEN,
+      chatId: chat.id,
+      from: ctx.from,
+      startPayload: startArg,
+      botUsername: env.TELEGRAM_BOT_USERNAME,
+      miniAppShortName: env.TELEGRAM_MINI_APP_SHORT_NAME
+    });
     await ctx.reply(
       "Splitrr is ready. Use /split to open the Mini App, or /balance for your personal balance card.",
       replyMarkup ? { reply_markup: replyMarkup } : undefined

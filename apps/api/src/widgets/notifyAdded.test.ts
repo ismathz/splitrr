@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
-import { applyMigrations } from "@splitbot/db";
+import { applyMigrations, listUndeliveredPendingForBill } from "@splitbot/db";
 import { notifyNewlyAddedMembers } from "./notifyAdded";
 
 describe("notifyNewlyAddedMembers", () => {
@@ -24,11 +24,14 @@ describe("notifyNewlyAddedMembers", () => {
     ).run();
     db.query(
       `INSERT INTO bill_sessions (id, group_id, title, status, currency, created_by_user_id)
-       VALUES ('bill-1', 1, 'Dinner', 'pending', 'USD', 1)`,
+       VALUES ('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 1, 'Dinner', 'pending', 'USD', 1)`,
     ).run();
     db.query(
-      `INSERT INTO bill_session_members (id, bill_session_id, member_name)
-       VALUES ('m1', 'bill-1', 'Alice'), ('m2', 'bill-1', 'Bob'), ('m3', 'bill-1', 'Cara')`,
+      `INSERT INTO bill_session_members (id, bill_session_id, member_name, is_placeholder, placeholder_username)
+       VALUES ('m1', 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'Alice', 0, NULL),
+              ('m2', 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'Bob', 0, NULL),
+              ('m3', 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'Cara', 0, NULL),
+              ('m4', 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', '@dave', 1, 'dave')`,
     ).run();
     calls.length = 0;
     globalThis.fetch = (async (
@@ -54,24 +57,96 @@ describe("notifyNewlyAddedMembers", () => {
     }) as typeof fetch;
   });
 
-  it("DMs only newly added members who started the bot", async () => {
+  it("DMs newly added members with a reachable private chat (incl. no prior dm_started)", async () => {
     const result = await notifyNewlyAddedMembers({
       db,
       botToken: "123:ABC",
-      billId: "bill-1",
+      billId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
       previousMembers: ["Alice"],
       nextMembers: ["Alice", "Bob", "Cara"],
       botUsername: "SplitrrBot",
       miniAppShortName: "app",
     });
-    // Bob has dm_started; Cara does not.
-    expect(result.sent).toBe(1);
-    expect(result.skipped).toBe(1);
-    const widget = calls.find((c) => c.method === "sendWidget");
-    expect(widget?.body.chat_id).toBe(222);
-    expect(widget?.body).not.toHaveProperty("caption");
-    expect(String(widget?.body.html ?? "")).toContain("Mark as paid");
-    expect(calls.some((c) => c.method === "sendMessage")).toBe(false);
+    // Bob already started; Cara has tg id but never started — still attempted.
+    expect(result.sent).toBe(2);
+    expect(result.undeliverable).toEqual([]);
+    const widgetChats = calls
+      .filter((c) => c.method === "sendWidget")
+      .map((c) => c.body.chat_id)
+      .sort();
+    expect(widgetChats).toEqual([222, 333]);
+    const cara = db
+      .query(`SELECT dm_started_at FROM users WHERE telegram_user_id = '333'`)
+      .get() as { dm_started_at: string | null };
+    expect(cara.dm_started_at).toBeTruthy();
+  });
+
+  it("queues never_started when Telegram forbids initiating the chat", async () => {
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      const method = url.split("/").pop() ?? "unknown";
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : {};
+      calls.push({ method, body });
+      if (method === "sendWidget" || method === "sendMessage") {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            description: "Forbidden: bot can't initiate conversation with a user",
+          }),
+          { status: 403, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true, result: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const result = await notifyNewlyAddedMembers({
+      db,
+      botToken: "123:ABC",
+      billId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      previousMembers: [],
+      nextMembers: ["Cara"],
+      botUsername: "SplitrrBot",
+      miniAppShortName: "app",
+    });
+    expect(result.sent).toBe(0);
+    expect(result.undeliverable).toHaveLength(1);
+    expect(result.undeliverable[0]?.reason).toBe("never_started");
+    expect(result.undeliverable[0]?.startLink).toContain(
+      "https://t.me/SplitrrBot?start=n",
+    );
+    const pending = listUndeliveredPendingForBill(
+      db,
+      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    );
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.reason).toBe("never_started");
+    expect(pending[0]?.telegram_user_id).toBe("333");
+  });
+
+  it("queues placeholders without a Telegram id", async () => {
+    const result = await notifyNewlyAddedMembers({
+      db,
+      botToken: "123:ABC",
+      billId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      previousMembers: ["Alice"],
+      nextMembers: ["Alice", "@dave"],
+      botUsername: "SplitrrBot",
+      miniAppShortName: "app",
+    });
+    expect(result.sent).toBe(0);
+    expect(result.undeliverable).toHaveLength(1);
+    expect(result.undeliverable[0]?.reason).toBe("placeholder");
+    expect(listUndeliveredPendingForBill(db, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")).toHaveLength(
+      1,
+    );
   });
 
   it("falls back to sendMessage when sendWidget fails", async () => {
@@ -100,7 +175,7 @@ describe("notifyNewlyAddedMembers", () => {
     const result = await notifyNewlyAddedMembers({
       db,
       botToken: "123:ABC",
-      billId: "bill-1",
+      billId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
       previousMembers: [],
       nextMembers: ["Bob"],
       botUsername: "SplitrrBot",

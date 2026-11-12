@@ -147,6 +147,20 @@ describe("formatBillAnnounceMessage", () => {
     expect(text).toContain("With: @ada");
     expect(text).toContain("Waiting on @cara to join");
   });
+
+  it("mentions undeliverable DM recipients with a Start deep link", () => {
+    const text = formatBillAnnounceMessage(bill, {
+      people: [{ displayName: "Ada", username: "ada" }],
+      startNudge: {
+        labels: ["@cara", "Bob"],
+        startLink: "https://t.me/SplitrrBot?start=naaaa"
+      }
+    });
+    expect(text).toContain("DM alerts: @cara, Bob");
+    expect(text).toContain(
+      "https://t.me/SplitrrBot?start=naaaa"
+    );
+  });
 });
 
 describe("buildBillAnnounceReplyMarkup", () => {

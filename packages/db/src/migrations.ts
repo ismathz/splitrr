@@ -13,6 +13,7 @@ import {
   v10ChargesLabelAndRate,
   v11ChatMembersPlugin,
   v12GroupJoinOnboarding,
+  v13PendingAddedNotifications,
 } from "./schema";
 
 const orderedMigrations: Array<{ name: string; sql: string }> = [
@@ -45,6 +46,10 @@ const orderedMigrations: Array<{ name: string; sql: string }> = [
   {
     name: "012_group_join_onboarding.sql",
     sql: v12GroupJoinOnboarding,
+  },
+  {
+    name: "013_pending_added_notifications.sql",
+    sql: v13PendingAddedNotifications,
   },
 ];
 

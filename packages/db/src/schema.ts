@@ -253,3 +253,29 @@ CREATE TABLE IF NOT EXISTS group_join_cards (
 ALTER TABLE bill_session_members ADD COLUMN is_placeholder INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE bill_session_members ADD COLUMN placeholder_username TEXT;
 `;
+
+/**
+ * Queue for "you've been added" DMs that could not be delivered (user never
+ * /start'd the bot in private, placeholder with no Telegram id, or send failed).
+ * Delivered when the user later opens a private chat via /start.
+ */
+export const v13PendingAddedNotifications = `
+CREATE TABLE IF NOT EXISTS pending_added_notifications (
+  id TEXT PRIMARY KEY,
+  bill_session_id TEXT NOT NULL,
+  member_name TEXT NOT NULL,
+  telegram_user_id TEXT,
+  reason TEXT NOT NULL,
+  start_payload TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  delivered_at TEXT,
+  last_error TEXT,
+  FOREIGN KEY (bill_session_id) REFERENCES bill_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_added_bill_undelivered
+  ON pending_added_notifications(bill_session_id, delivered_at);
+
+CREATE INDEX IF NOT EXISTS idx_pending_added_user_undelivered
+  ON pending_added_notifications(telegram_user_id, delivered_at);
+`;

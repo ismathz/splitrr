@@ -106,6 +106,23 @@ export function formatWaitingOnLabel(person: AnnouncePerson): string {
   return name || "someone";
 }
 
+export type AnnounceStartNudge = {
+  /** People who need to /start the bot for the added card + future DMs. */
+  labels: string[];
+  /** Deep link `t.me/<bot>?start=...` for this bill. */
+  startLink: string;
+};
+
+export function formatAnnounceStartNudge(nudge: AnnounceStartNudge): string {
+  const labels = nudge.labels
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+  if (labels.length === 0 || !nudge.startLink.trim()) return "";
+  const who = labels.map((l) => escapeHtml(l)).join(", ");
+  return `DM alerts: ${who} — Start Splitrr here for this bill + notifications: ${nudge.startLink.trim()}`;
+}
+
 export function formatBillAnnounceMessage(
   bill: BillAnnounceRow,
   extras?: {
@@ -113,6 +130,8 @@ export function formatBillAnnounceMessage(
     totalCents?: number;
     openUrl?: string | null;
     people?: AnnouncePerson[];
+    /** Recipients who did not get a private "you've been added" card yet. */
+    startNudge?: AnnounceStartNudge | null;
   }
 ): string {
   const people = (extras?.people ?? []).filter((p) => p.displayName.trim());
@@ -126,6 +145,9 @@ export function formatBillAnnounceMessage(
     waiting.length > 0
       ? `Waiting on ${waiting.map(formatWaitingOnLabel).join(", ")} to join`
       : null;
+  const startNudgeLine = extras?.startNudge
+    ? formatAnnounceStartNudge(extras.startNudge)
+    : "";
 
   const lines = [
     `Splitrr · ${escapeHtml(bill.title)}`,
@@ -133,6 +155,7 @@ export function formatBillAnnounceMessage(
     `Date: ${formatAnnounceBillDate(bill.billDate)}`,
     peopleLine,
     waitingLine,
+    startNudgeLine || null,
     typeof extras?.itemCount === "number"
       ? `Items: ${extras.itemCount}`
       : null,
