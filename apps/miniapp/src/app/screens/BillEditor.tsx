@@ -5,7 +5,12 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { BILL_CURRENCY_OPTIONS, normalizeCurrencyCode } from "@splitbot/shared";
+import {
+  allocateCentsByWeight,
+  allocateCentsEqual,
+  BILL_CURRENCY_OPTIONS,
+  normalizeCurrencyCode,
+} from "@splitbot/shared";
 import useEmblaCarousel from "embla-carousel-react";
 import {
   DndContext,
@@ -936,10 +941,10 @@ export function BillEditor(props: BillEditorProps) {
   const totals = useMemo(() => {
     const map = new Map<string, number>();
     for (const item of items) {
-      const share = Math.floor(
-        item.totalPriceCents / Math.max(item.assignees.length, 1),
-      );
-      for (const member of item.assignees) {
+      const assignees = item.assignees.filter(Boolean);
+      if (assignees.length === 0) continue;
+      const parts = allocateCentsEqual(item.totalPriceCents, assignees);
+      for (const [member, share] of parts) {
         map.set(member, (map.get(member) ?? 0) + share);
       }
     }
@@ -1059,58 +1064,18 @@ export function BillEditor(props: BillEditorProps) {
     if (differenceCents === 0) return baseTotals;
 
     const hasPositiveBase = baseSplitTotalCents > 0;
-    const weights = baseTotals.map(([, cents]) =>
-      hasPositiveBase ? cents : 1 / baseTotals.length,
+    const allocation = allocateCentsByWeight(
+      differenceCents,
+      baseTotals.map(([member, cents]) => ({
+        id: member,
+        weight: hasPositiveBase ? cents : 1,
+      })),
     );
-    const weightSum = hasPositiveBase
-      ? baseSplitTotalCents
-      : weights.reduce((sum, weight) => sum + weight, 0);
 
-    const distributed = baseTotals.map(([member, cents], index) => {
-      const exactShare = (differenceCents * weights[index]) / weightSum;
-      const roundedTowardZero = Math.trunc(exactShare);
-      return {
-        member,
-        baseCents: cents,
-        allocatedCents: roundedTowardZero,
-        remainder: exactShare - roundedTowardZero,
-      };
-    });
-
-    let allocatedSum = distributed.reduce(
-      (sum, row) => sum + row.allocatedCents,
-      0,
+    return baseTotals.map(
+      ([member, cents]) =>
+        [member, cents + (allocation.get(member) ?? 0)] as [string, number],
     );
-    let leftover = differenceCents - allocatedSum;
-
-    if (leftover > 0) {
-      const byLargestRemainder = [...distributed].sort(
-        (a, b) => b.remainder - a.remainder,
-      );
-      for (let i = 0; i < leftover; i += 1) {
-        byLargestRemainder[i % byLargestRemainder.length].allocatedCents += 1;
-      }
-    } else if (leftover < 0) {
-      const bySmallestRemainder = [...distributed].sort(
-        (a, b) => a.remainder - b.remainder,
-      );
-      for (let i = 0; i < Math.abs(leftover); i += 1) {
-        bySmallestRemainder[i % bySmallestRemainder.length].allocatedCents -= 1;
-      }
-    }
-
-    allocatedSum = distributed.reduce(
-      (sum, row) => sum + row.allocatedCents,
-      0,
-    );
-    if (allocatedSum !== differenceCents) {
-      distributed[0].allocatedCents += differenceCents - allocatedSum;
-    }
-
-    return distributed.map(({ member, baseCents, allocatedCents }) => [
-      member,
-      baseCents + allocatedCents,
-    ]) as [string, number][];
   }, [totals, items, subtotalCents, grandTotalCents]);
   const splitTotalCents = useMemo(
     () => splitTotals.reduce((sum, [, cents]) => sum + cents, 0),

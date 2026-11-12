@@ -1,3 +1,5 @@
+import { allocateCentsByWeight, allocateCentsEqual } from "./allocateCents";
+
 /** Line item used for honor-system share math. */
 export type ShareItem = {
   totalPriceCents: number;
@@ -5,16 +7,19 @@ export type ShareItem = {
 };
 
 /**
- * Per-member item shares (floor split). Matches Mini App details breakdown.
+ * Per-member item shares using largest-remainder equal splits per line item.
+ * Matches Mini App details breakdown and widget honor-system math.
  */
 export function itemSharesByMember(items: ShareItem[]): Map<string, number> {
   const map = new Map<string, number>();
   for (const item of items) {
-    const n = Math.max(item.assignees.length, 1);
-    const share = Math.floor(item.totalPriceCents / n);
-    for (const member of item.assignees) {
-      const name = member.trim();
-      if (!name) continue;
+    const assignees = item.assignees
+      .map((member) => member.trim())
+      .filter(Boolean);
+    if (assignees.length === 0) continue;
+
+    const parts = allocateCentsEqual(item.totalPriceCents, assignees);
+    for (const [name, share] of parts) {
       map.set(name, (map.get(name) ?? 0) + share);
     }
   }
@@ -33,24 +38,13 @@ export function applyChargesProportionally(
   if (chargesTotalCents === 0 || next.size === 0) return next;
 
   const members = [...next.entries()].map(([name, share]) => ({
-    name,
+    id: name,
     weight: Math.max(share, 0),
   }));
-  const weightSum = members.reduce((s, m) => s + m.weight, 0);
-  const weights =
-    weightSum > 0 ? members : members.map((m) => ({ ...m, weight: 1 }));
-  const totalWeight = weights.reduce((s, m) => s + m.weight, 0);
-  if (totalWeight <= 0) return next;
-
-  let allocated = 0;
-  weights.forEach((m, index) => {
-    const isLast = index === weights.length - 1;
-    const portion = isLast
-      ? chargesTotalCents - allocated
-      : Math.floor((chargesTotalCents * m.weight) / totalWeight);
-    allocated += portion;
-    next.set(m.name, (next.get(m.name) ?? 0) + portion);
-  });
+  const allocation = allocateCentsByWeight(chargesTotalCents, members);
+  for (const [name, portion] of allocation) {
+    next.set(name, (next.get(name) ?? 0) + portion);
+  }
   return next;
 }
 

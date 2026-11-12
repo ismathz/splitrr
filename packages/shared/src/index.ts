@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./currency";
+export * from "./allocateCents";
 export * from "./billShares";
 export * from "./telegramWebAppAuth";
 export * from "./telegramToken";

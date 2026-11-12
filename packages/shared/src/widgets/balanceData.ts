@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { allocateCentsEqual } from "../allocateCents";
 import { applyChargesProportionally } from "../billShares";
 import { compactJsonUnderBudget, truncateUtf8 } from "./size";
 import type { BalanceChatData, BalanceLineData } from "./types";
@@ -246,9 +247,9 @@ export function buildBalanceChatData(
         if (row.assignee?.trim()) entry.assignees.push(row.assignee.trim());
       }
       for (const entry of byItem.values()) {
-        const n = Math.max(entry.assignees.length, 1);
-        const share = Math.floor(entry.total / n);
-        for (const name of entry.assignees) {
+        if (entry.assignees.length === 0) continue;
+        const parts = allocateCentsEqual(entry.total, entry.assignees);
+        for (const [name, share] of parts) {
           shares.set(name, (shares.get(name) ?? 0) + share);
         }
       }
@@ -256,9 +257,10 @@ export function buildBalanceChatData(
       if (shares.size === 0 && memberNames.length > 0) {
         const total = itemRows.reduce((s, r) => s + (r.total || 0), 0);
         // Deduplicate item totals (left join inflates).
-        const uniqTotal = [...byItem.values()].reduce((s, e) => s + e.total, 0) || total;
-        const each = Math.floor(uniqTotal / memberNames.length);
-        for (const name of memberNames) shares.set(name, each);
+        const uniqTotal =
+          [...byItem.values()].reduce((s, e) => s + e.total, 0) || total;
+        const equal = allocateCentsEqual(uniqTotal, memberNames);
+        for (const [name, each] of equal) shares.set(name, each);
       }
 
       const chargeRows = db

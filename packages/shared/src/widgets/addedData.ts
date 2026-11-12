@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { allocateCentsEqual } from "../allocateCents";
 import { applyChargesProportionally } from "../billShares";
 import { compactJsonUnderBudget, truncateUtf8 } from "./size";
 import type { AddedChatData, AddedItemData } from "./types";
@@ -71,37 +72,34 @@ export function buildAddedChatData(
   const items: AddedItemData[] = [];
   const itemShares = new Map<string, number>();
   for (const entry of byItem.values()) {
-    const n = Math.max(entry.assignees.length, 1);
-    const part = Math.floor(entry.total / n);
-    for (const name of entry.assignees) {
+    if (entry.assignees.length === 0) continue;
+    const parts = allocateCentsEqual(entry.total, entry.assignees);
+    for (const [name, part] of parts) {
       itemShares.set(name, (itemShares.get(name) ?? 0) + part);
     }
     const hit = entry.assignees.some((a) => a.toLowerCase() === memberKey);
     if (!hit) continue;
-    items.push({ n: truncateUtf8(entry.name, 28), a: part });
+    const memberPart =
+      [...parts.entries()].find(([name]) => name.toLowerCase() === memberKey)?.[1] ??
+      0;
+    items.push({ n: truncateUtf8(entry.name, 28), a: memberPart });
   }
 
   if (items.length === 0) {
     // Member on roster but no items yet — still notify with equal split of total.
-    const memberCountRow = db
-      .query(
-        `SELECT COUNT(*) AS c FROM bill_session_members WHERE bill_session_id = ?1`,
-      )
-      .get(input.billId) as { c: number };
     const total = [...byItem.values()].reduce((s, e) => s + e.total, 0);
-    const n = Math.max(Number(memberCountRow.c) || 1, 1);
-    const each = Math.floor(total / n);
     const members = db
       .query(
         `SELECT member_name FROM bill_session_members WHERE bill_session_id = ?1`,
       )
       .all(input.billId) as Array<{ member_name: string }>;
-    for (const row of members) {
-      const name = row.member_name.trim();
-      if (name) itemShares.set(name, each);
-    }
-    if (itemShares.size === 0) {
-      itemShares.set(input.memberName.trim(), each);
+    const names = members
+      .map((row) => row.member_name.trim())
+      .filter(Boolean);
+    const ids = names.length > 0 ? names : [input.memberName.trim()];
+    const equal = allocateCentsEqual(total, ids);
+    for (const [name, each] of equal) {
+      itemShares.set(name, each);
     }
   }
 
