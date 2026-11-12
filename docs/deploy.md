@@ -16,7 +16,7 @@ It runs after **CI** succeeds on a **push to `main`**, or via **`workflow_dispat
 
 ### VPS git / deploy-key status (verified)
 
-- `origin` is `git@github.com-splitbot:ismathz/splitbot.git` — `git fetch origin main` works.
+- `origin` is `git@github.com-splitbot:ismathz/splitrr.git` — `git fetch origin main` works. (Old GitHub slug redirects; VPS Admin updates the server remote separately. Deploy still uses `~/apps/splitbot` + `splitbot-*` units.)
 - Deploy key `splitbot-deploy@srv1495393` is on the GitHub repo (read-only).
 - Checkout on the VPS is **behind** `origin/main`; the first deploy’s `git reset --hard origin/main` will move it forward.
 
