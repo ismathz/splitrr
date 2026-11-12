@@ -4,7 +4,7 @@ function money(currency: string, cents: number): string {
   return `${currency} ${(cents / 100).toFixed(2)}`;
 }
 
-/** Plain-text caption / non-widget fallback for the balance card. */
+/** Plain-text sendMessage fallback when sendWidget fails (not a widget caption). */
 export function formatBalanceCaption(data: BalanceChatData): string {
   const oweLines =
     data.owe.length === 0
@@ -27,7 +27,7 @@ export function formatBalanceCaption(data: BalanceChatData): string {
   return ["Splitrr · Your balance", ...oweLines, ...owedLines].join("\n");
 }
 
-/** Plain-text caption / non-widget fallback for the added-to-bill card. */
+/** Plain-text sendMessage fallback when sendWidget fails (not a widget caption). */
 export function formatAddedCaption(data: AddedChatData): string {
   const lines = [
     "Splitrr · You've been added",

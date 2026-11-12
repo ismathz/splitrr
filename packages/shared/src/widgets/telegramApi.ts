@@ -1,7 +1,12 @@
 export type SendWidgetParams = {
   chatId: number | string;
   html: string;
-  caption: string;
+  /**
+   * Plain-text body for sendMessage when sendWidget fails.
+   * Never sent as a widget caption — Telegram renders captions under the
+   * widget on capable clients, which duplicates the card UI.
+   */
+  textFallback: string;
   chatData?: string;
   publicData?: string;
   allowQueries?: boolean;
@@ -44,12 +49,13 @@ async function telegramApi(
 
 export async function sendWidget(
   botToken: string,
-  params: SendWidgetParams,
+  params: Omit<SendWidgetParams, "textFallback"> & { textFallback?: string },
 ): Promise<SendWidgetResult> {
+  // caption is optional in Bot API sendWidget; omit it so widget-capable
+  // clients show only the HTML card (no duplicate title under the widget).
   const body: Record<string, unknown> = {
     chat_id: params.chatId,
     html: params.html,
-    caption: params.caption,
     allow_queries: params.allowQueries ?? true,
   };
   if (params.chatData != null) body.chat_data = params.chatData;
@@ -108,7 +114,11 @@ export async function editMessageWidgetData(
   return { ok: false, error: desc || `edit_failed_${res.status}` };
 }
 
-/** Prefer widget; fall back to plain text caption when sendWidget fails. */
+/**
+ * Prefer widget with no caption; fall back to plain text when sendWidget fails.
+ * Non-widget clients that still receive a successful sendWidget see unsupported
+ * media (no caption). Full text is only sent when the API rejects the widget.
+ */
 export async function sendWidgetOrText(
   botToken: string,
   params: SendWidgetParams,
@@ -120,7 +130,7 @@ export async function sendWidgetOrText(
   console.warn("[widgets] sendWidget failed, falling back to text", widget.error);
   const textRes = await telegramApi(botToken, "sendMessage", {
     chat_id: params.chatId,
-    text: params.caption.slice(0, 4096),
+    text: params.textFallback.slice(0, 4096),
     disable_web_page_preview: true,
   });
   if (!textRes.ok) {

@@ -69,11 +69,10 @@ export async function sendBalanceWidget(input: {
     miniAppShortName: input.miniAppShortName,
   });
   const chatData = serializeBalanceChatData(data);
-  const caption = formatBalanceCaption(data);
   return sendWidgetOrText(input.botToken, {
     chatId: input.chatId,
     html: BALANCE_WIDGET_HTML,
-    caption,
+    textFallback: formatBalanceCaption(data),
     chatData,
     allowQueries: true,
   });
@@ -96,11 +95,10 @@ export async function sendAddedWidget(input: {
   });
   if (!data) return { mode: "text", error: "bill_not_found" };
   const chatData = serializeAddedChatData(data);
-  const caption = formatAddedCaption(data);
   return sendWidgetOrText(input.botToken, {
     chatId: input.chatId,
     html: ADDED_WIDGET_HTML,
-    caption,
+    textFallback: formatAddedCaption(data),
     chatData,
     allowQueries: true,
   });

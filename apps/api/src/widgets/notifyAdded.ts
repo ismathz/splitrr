@@ -114,7 +114,7 @@ export async function notifyNewlyAddedMembers(input: {
       const result = await sendWidgetOrText(token, {
         chatId: tgId,
         html: ADDED_WIDGET_HTML,
-        caption: formatAddedCaption(data),
+        textFallback: formatAddedCaption(data),
         chatData: serializeAddedChatData(data),
         allowQueries: true,
       });

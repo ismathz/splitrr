@@ -69,8 +69,9 @@ describe("notifyNewlyAddedMembers", () => {
     expect(result.skipped).toBe(1);
     const widget = calls.find((c) => c.method === "sendWidget");
     expect(widget?.body.chat_id).toBe(222);
-    expect(String(widget?.body.caption ?? "")).toContain("Splitrr");
+    expect(widget?.body).not.toHaveProperty("caption");
     expect(String(widget?.body.html ?? "")).toContain("Mark as paid");
+    expect(calls.some((c) => c.method === "sendMessage")).toBe(false);
   });
 
   it("falls back to sendMessage when sendWidget fails", async () => {
@@ -106,6 +107,9 @@ describe("notifyNewlyAddedMembers", () => {
       miniAppShortName: "app",
     });
     expect(result.sent).toBe(1);
-    expect(calls.some((c) => c.method === "sendMessage")).toBe(true);
+    const text = calls.find((c) => c.method === "sendMessage");
+    expect(text).toBeTruthy();
+    expect(String(text?.body.text ?? "")).toContain("Splitrr");
+    expect(String(text?.body.text ?? "")).toContain("You've been added");
   });
 });

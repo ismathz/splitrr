@@ -19,6 +19,7 @@ import {
   type BalanceChatData,
 } from "./types";
 import { formatAddedCaption, formatBalanceCaption } from "./captions";
+import { sendWidget, sendWidgetOrText } from "./telegramApi";
 
 describe("widget HTML size budget", () => {
   it("balance HTML fits raw + zlib level 9 limits", () => {
@@ -91,6 +92,7 @@ describe("chat_data budget", () => {
     const balanceJson = compactJsonUnderBudget(balance);
     assertWidgetDataBudget(balanceJson);
     expect(formatBalanceCaption(balance)).toContain("Splitrr");
+    expect(formatBalanceCaption(balance)).toContain("Your balance");
 
     const added: AddedChatData = {
       r: 1,
@@ -112,5 +114,91 @@ describe("chat_data budget", () => {
     const addedJson = compactJsonUnderBudget(added);
     assertWidgetDataBudget(addedJson);
     expect(formatAddedCaption(added)).toContain("You've been added");
+  });
+});
+
+describe("sendWidget caption omission", () => {
+  it("omits caption from sendWidget body", async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      captured.push(
+        init?.body
+          ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+          : {},
+      );
+      return new Response(
+        JSON.stringify({ ok: true, result: { message_id: 11 } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await sendWidget("123:ABC", {
+      chatId: 1,
+      html: BALANCE_WIDGET_HTML,
+      chatData: "{}",
+    });
+    expect(result.ok).toBe(true);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).not.toHaveProperty("caption");
+    expect(captured[0]?.html).toBe(BALANCE_WIDGET_HTML);
+  });
+
+  it("falls back to textFallback via sendMessage only when sendWidget fails", async () => {
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const method = String(input).split("/").pop() ?? "unknown";
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : {};
+      calls.push({ method, body });
+      if (method === "sendWidget") {
+        return new Response(
+          JSON.stringify({ ok: false, description: "widgets_unavailable" }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ ok: true, result: { message_id: 12 } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const fallback = formatBalanceCaption({
+      r: 1,
+      owe: [],
+      owed: [],
+      bot: "SplitrrBot",
+      app: "app",
+    });
+    const result = await sendWidgetOrText("123:ABC", {
+      chatId: 9,
+      html: BALANCE_WIDGET_HTML,
+      textFallback: fallback,
+    });
+    expect(result.mode).toBe("text");
+    expect(result.messageId).toBe(12);
+    const widgetCall = calls.find((c) => c.method === "sendWidget");
+    expect(widgetCall?.body).not.toHaveProperty("caption");
+    const textCall = calls.find((c) => c.method === "sendMessage");
+    expect(String(textCall?.body.text ?? "")).toBe(fallback);
+  });
+});
+
+describe("widget HTML titles", () => {
+  it("does not embed Splitrr caption-style duplicate titles", () => {
+    expect(BALANCE_WIDGET_HTML).not.toContain("Splitrr · Your balance");
+    expect(BALANCE_WIDGET_HTML).not.toContain("Splitrr - your balance");
+    expect(ADDED_WIDGET_HTML).not.toContain("Splitrr · You've been added");
+    expect(ADDED_WIDGET_HTML).not.toContain("Splitrr - you've been added");
+    // Card headings stay inside the widget UI only (not as sendWidget captions).
+    expect(BALANCE_WIDGET_HTML).toContain("<h1>Your balance</h1>");
+    // Apostrophe is escaped for the widget's single-quoted JS string.
+    expect(ADDED_WIDGET_HTML).toContain("<h1>You\\'ve been added</h1>");
   });
 });
