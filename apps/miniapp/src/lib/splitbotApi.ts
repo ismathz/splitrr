@@ -276,11 +276,9 @@ export type ApiGroupRoster = {
   memberCount: number | null;
   seenCount: number;
   unseenCount: number | null;
-  /** Whether @SplitrrBot is a group admin (needed for chat_member join tracking). */
+  /** Whether @SplitrrBot is a group admin (diagnostic; not shown in product UI). */
   botIsAdmin?: boolean | null;
   botUsername?: string | null;
-  /** Product UX when bot is not admin — not BotFather/ops docs. */
-  adminHint?: string | null;
   backfillError?: string | null;
 };
 

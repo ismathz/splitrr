@@ -14,8 +14,7 @@ export const ROSTER_JOIN_CALLBACK = "roster_join";
 export const JOIN_CARD_INTRO =
   "Hi, I split bills here. Tap below so you can be added to bills.";
 
-export const JOIN_BUTTON_TEXT = "Join bill splitting";
-export const JOIN_CLAIM_BUTTON_TEXT = "Join & claim my items";
+export const JOIN_BUTTON_TEXT = "Join Splitrr";
 
 /** Telegram editMessageText practical throttle for a single join card. */
 export const JOIN_CARD_EDIT_THROTTLE_MS = 2_000;
@@ -30,8 +29,6 @@ export function shortDisplayName(member: GroupRosterMember): string {
 
 export function formatJoinCardText(input: {
   members: GroupRosterMember[];
-  botIsAdmin: boolean | null;
-  botUsername?: string | null;
 }): string {
   const lines = [JOIN_CARD_INTRO, ""];
   const members = input.members;
@@ -45,15 +42,6 @@ export function formatJoinCardText(input: {
         ? `${shown.join(", ")} +${extra} more`
         : shown.join(", ");
     lines.push(`Joined (${members.length}): ${list}`);
-  }
-
-  if (input.botIsAdmin === false) {
-    const bot =
-      (input.botUsername?.trim().replace(/^@/, "") || "SplitrrBot");
-    lines.push("");
-    lines.push(
-      `Tip: make @${bot} an admin so new members are picked up automatically.`,
-    );
   }
 
   return lines.join("\n");
@@ -179,17 +167,6 @@ export function wasBotAddedAsMember(update: {
   return Boolean(wasOut && isIn);
 }
 
-export function wasBotAdminStatusChanged(update: {
-  old_chat_member?: { status?: string };
-  new_chat_member?: { status?: string };
-}): boolean {
-  const prev = update.old_chat_member?.status;
-  const next = update.new_chat_member?.status;
-  const prevAdmin = prev === "administrator" || prev === "creator";
-  const nextAdmin = next === "administrator" || next === "creator";
-  return prevAdmin !== nextAdmin;
-}
-
 type PendingJoinCardEdit = {
   timer: ReturnType<typeof setTimeout> | null;
   lastEditMs: number;
@@ -210,23 +187,16 @@ export function clearJoinCardEditThrottleForTests(): void {
  */
 export async function refreshGroupJoinCard(input: {
   api: Api;
-  groups: GroupRepository;
   roster: GroupRosterRepository;
   joinCards: GroupJoinCardRepository;
   groupId: number;
-  botUsername?: string | null;
   force?: boolean;
 }): Promise<"edited" | "scheduled" | "missing" | "failed"> {
   const card = input.joinCards.findByGroupId(input.groupId);
   if (!card) return "missing";
 
-  const group = input.groups.findByTelegramChatId(card.telegramChatId);
   const members = input.roster.listMembers(input.groupId);
-  const text = formatJoinCardText({
-    members,
-    botIsAdmin: group?.bot_is_admin ?? null,
-    botUsername: input.botUsername,
-  });
+  const text = formatJoinCardText({ members });
   const replyMarkup = buildJoinCardReplyMarkup();
 
   const runEdit = async (): Promise<"edited" | "failed"> => {
@@ -284,19 +254,13 @@ export async function postGroupJoinCard(input: {
   joinCards: GroupJoinCardRepository;
   telegramChatId: string | number;
   chatTitle?: string;
-  botUsername?: string | null;
 }): Promise<{ groupId: number; messageId: number } | null> {
   const groupId = input.groups.upsertGroup(
     String(input.telegramChatId),
     input.chatTitle?.trim() || "Untitled group",
   );
-  const group = input.groups.findByTelegramChatId(String(input.telegramChatId));
   const members = input.roster.listMembers(groupId);
-  const text = formatJoinCardText({
-    members,
-    botIsAdmin: group?.bot_is_admin ?? null,
-    botUsername: input.botUsername,
-  });
+  const text = formatJoinCardText({ members });
 
   try {
     const msg = await input.api.sendMessage(input.telegramChatId, text, {
@@ -315,14 +279,13 @@ export async function postGroupJoinCard(input: {
 }
 
 /**
- * Handle my_chat_member for join-card lifecycle: post on add, refresh admin tip.
+ * Handle my_chat_member for join-card lifecycle: post welcome card when added.
  */
 export async function handleBotMembershipForJoinCard(input: {
   ctx: Context;
   groups: GroupRepository;
   roster: GroupRosterRepository;
   joinCards: GroupJoinCardRepository;
-  botUsername?: string | null;
 }): Promise<void> {
   const chat = input.ctx.chat;
   if (!chat || (chat.type !== "group" && chat.type !== "supergroup")) return;
@@ -337,22 +300,6 @@ export async function handleBotMembershipForJoinCard(input: {
       joinCards: input.joinCards,
       telegramChatId: chat.id,
       chatTitle: "title" in chat ? chat.title : undefined,
-      botUsername: input.botUsername,
-    });
-    return;
-  }
-
-  if (wasBotAdminStatusChanged(update)) {
-    const group = input.groups.findByTelegramChatId(String(chat.id));
-    if (!group) return;
-    await refreshGroupJoinCard({
-      api: input.ctx.api,
-      groups: input.groups,
-      roster: input.roster,
-      joinCards: input.joinCards,
-      groupId: group.id,
-      botUsername: input.botUsername,
-      force: true,
     });
   }
 }

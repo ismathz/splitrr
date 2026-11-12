@@ -1792,11 +1792,6 @@ app.get("/api/groups/by-telegram-chat/:telegramChatId/roster", async (c) => {
   const unseenCount =
     memberCount != null ? Math.max(0, memberCount - seenCount) : null;
   const botIsAdmin = group?.bot_is_admin ?? null;
-  const botUsername = env.TELEGRAM_BOT_USERNAME;
-  const adminHint =
-    botIsAdmin === false
-      ? `Make @${botUsername} an admin to see everyone who joins; others appear once they send a message`
-      : null;
 
   return c.json({
     members: members.map((m) => ({
@@ -1809,8 +1804,7 @@ app.get("/api/groups/by-telegram-chat/:telegramChatId/roster", async (c) => {
     seenCount,
     unseenCount,
     botIsAdmin,
-    botUsername,
-    adminHint,
+    botUsername: env.TELEGRAM_BOT_USERNAME,
     backfillError: backfillError ?? null
   });
 });

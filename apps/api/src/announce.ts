@@ -168,7 +168,7 @@ export function formatBillAnnounceMessage(
   return lines.join("\n");
 }
 
-/** Inline keyboard for shared bill messages: Join & claim + optional Open. */
+/** Inline keyboard for shared bill messages: Join Splitrr + optional Open. */
 export function buildBillAnnounceReplyMarkup(input: {
   openUrl?: string | null;
   joinCallbackData?: string;
@@ -192,7 +192,7 @@ export function buildBillAnnounceReplyMarkup(input: {
   const joinData = input.joinCallbackData ?? "roster_join";
   rows.push([
     {
-      text: input.joinButtonText ?? "Join & claim my items",
+      text: input.joinButtonText ?? "Join Splitrr",
       callback_data: joinData
     }
   ]);

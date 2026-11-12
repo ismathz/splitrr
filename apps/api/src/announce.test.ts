@@ -164,14 +164,14 @@ describe("formatBillAnnounceMessage", () => {
 });
 
 describe("buildBillAnnounceReplyMarkup", () => {
-  it("adds Join & claim plus Open bill when url is present", () => {
+  it("adds Join Splitrr plus Open bill when url is present", () => {
     expect(
       buildBillAnnounceReplyMarkup({
         openUrl: "https://t.me/SplitrrBot/app?startapp=x"
       })
     ).toEqual({
       inline_keyboard: [
-        [{ text: "Join & claim my items", callback_data: "roster_join" }],
+        [{ text: "Join Splitrr", callback_data: "roster_join" }],
         [{ text: "Open bill", url: "https://t.me/SplitrrBot/app?startapp=x" }]
       ]
     });

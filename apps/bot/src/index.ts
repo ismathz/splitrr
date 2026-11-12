@@ -79,8 +79,7 @@ bot.use(async (ctx, next) => {
         ctx,
         groups,
         roster,
-        joinCards,
-        botUsername: env.TELEGRAM_BOT_USERNAME
+        joinCards
       });
     }
   } catch (err) {
@@ -94,11 +93,9 @@ async function refreshJoinCardAfterRegister(telegramChatId: string): Promise<voi
   if (!group) return;
   await refreshGroupJoinCard({
     api: bot.api,
-    groups,
     roster,
     joinCards,
-    groupId: group.id,
-    botUsername: env.TELEGRAM_BOT_USERNAME
+    groupId: group.id
   });
 }
 

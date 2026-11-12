@@ -18,28 +18,21 @@ import {
 } from "./groupJoinOnboarding";
 
 describe("formatJoinCardText", () => {
-  it("includes welcome, joined list, and admin tip when not admin", () => {
+  it("includes welcome and joined list without admin tip", () => {
     const text = formatJoinCardText({
       members: [
         { tgUserId: 1, name: "Ada Lovelace", username: "ada", photoUrl: null },
         { tgUserId: 2, name: "Bob", username: null, photoUrl: null },
       ],
-      botIsAdmin: false,
-      botUsername: "SplitrrBot",
     });
     expect(text).toContain("Hi, I split bills here");
     expect(text).toContain("Joined (2): @ada, Bob");
-    expect(text).toContain(
-      "make @SplitrrBot an admin so new members are picked up automatically",
-    );
+    expect(text).not.toContain("admin");
+    expect(text).not.toContain("picked up automatically");
   });
 
-  it("omits admin tip when bot is admin", () => {
-    const text = formatJoinCardText({
-      members: [],
-      botIsAdmin: true,
-      botUsername: "SplitrrBot",
-    });
+  it("shows empty joined state", () => {
+    const text = formatJoinCardText({ members: [] });
     expect(text).toContain("nobody yet");
     expect(text).not.toContain("admin");
   });
@@ -52,7 +45,7 @@ describe("appendJoinButtonToMarkup", () => {
     });
     expect(markup.inline_keyboard).toEqual([
       [{ text: "Open Splitrr", url: "https://t.me/x" }],
-      [{ text: "Join bill splitting", callback_data: ROSTER_JOIN_CALLBACK }],
+      [{ text: "Join Splitrr", callback_data: ROSTER_JOIN_CALLBACK }],
     ]);
   });
 });
