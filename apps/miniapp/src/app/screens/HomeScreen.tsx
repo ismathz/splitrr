@@ -108,7 +108,6 @@ export function HomeScreen() {
         const { bills } = await getGroupHistoryByTelegramChatId(
           splitbotApiBase,
           billApiContext.telegramChatId,
-          launchCtx.currentUser?.id,
         );
         if (cancelled) return;
         setServerBills(
@@ -132,7 +131,7 @@ export function HomeScreen() {
     return () => {
       cancelled = true;
     };
-  }, [splitbotApiBase, billApiContext, launchCtx.currentUser?.id]);
+  }, [splitbotApiBase, billApiContext]);
 
   const bills =
     serverBills ?? (isDevMockDataEnabled() ? mockBills : []);
@@ -257,7 +256,7 @@ export function HomeScreen() {
           </CardTitle>
           <CardDescription className="mt-1">
             {isLoadingHistory
-              ? "Fetching your bill history."
+              ? "Fetching bill history for this chat."
               : !splitbotApiBase
                 ? "Connect to the API to load bills for this chat."
                 : !billApiContext
