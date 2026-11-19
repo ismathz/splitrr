@@ -61,34 +61,6 @@ export function buildJoinCardReplyMarkup(): {
   };
 }
 
-/** Open Mini App row + Join row for /split prompts. */
-export function appendJoinButtonToMarkup(
-  markup:
-    | {
-        inline_keyboard: Array<
-          Array<
-            | { text: string; web_app: { url: string } }
-            | { text: string; url: string }
-            | { text: string; callback_data: string }
-          >
-        >;
-      }
-    | undefined,
-  joinText: string = JOIN_BUTTON_TEXT,
-): {
-  inline_keyboard: Array<
-    Array<
-      | { text: string; web_app: { url: string } }
-      | { text: string; url: string }
-      | { text: string; callback_data: string }
-    >
-  >;
-} {
-  const rows = markup?.inline_keyboard ? [...markup.inline_keyboard] : [];
-  rows.push([buildJoinCallbackButton(joinText)]);
-  return { inline_keyboard: rows };
-}
-
 export type RegisterJoinerResult = {
   alreadyJoined: boolean;
   userId: number;

@@ -21,7 +21,6 @@ import {
   type WebhookInfoSummary
 } from "./ensureTelegramWebhook";
 import {
-  appendJoinButtonToMarkup,
   handleBotMembershipForJoinCard,
   refreshGroupJoinCard,
   registerGroupJoiner,
@@ -411,7 +410,7 @@ bot.command("split", async (ctx) => {
     await ctx.reply(
       "Open Splitrr to create or continue a bill for this chat.",
       {
-        reply_markup: appendJoinButtonToMarkup(openMarkup)
+        reply_markup: openMarkup
       }
     );
     await refreshJoinCardAfterRegister(String(chat.id));

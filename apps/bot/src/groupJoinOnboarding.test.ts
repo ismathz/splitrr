@@ -10,8 +10,9 @@ import {
   GroupRosterRepository,
 } from "@splitbot/db";
 import {
-  appendJoinButtonToMarkup,
+  buildJoinCardReplyMarkup,
   formatJoinCardText,
+  JOIN_BUTTON_TEXT,
   registerGroupJoiner,
   ROSTER_JOIN_CALLBACK,
   wasBotAddedAsMember,
@@ -38,15 +39,13 @@ describe("formatJoinCardText", () => {
   });
 });
 
-describe("appendJoinButtonToMarkup", () => {
-  it("adds a join callback row under the open button", () => {
-    const markup = appendJoinButtonToMarkup({
-      inline_keyboard: [[{ text: "Open Splitrr", url: "https://t.me/x" }]],
+describe("buildJoinCardReplyMarkup", () => {
+  it("keeps Join Splitrr on the group welcome card", () => {
+    expect(buildJoinCardReplyMarkup()).toEqual({
+      inline_keyboard: [
+        [{ text: JOIN_BUTTON_TEXT, callback_data: ROSTER_JOIN_CALLBACK }],
+      ],
     });
-    expect(markup.inline_keyboard).toEqual([
-      [{ text: "Open Splitrr", url: "https://t.me/x" }],
-      [{ text: "Join Splitrr", callback_data: ROSTER_JOIN_CALLBACK }],
-    ]);
   });
 });
 

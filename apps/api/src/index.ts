@@ -3,13 +3,11 @@ import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { randomUUID } from "node:crypto";
 import {
-  buildBotStartDeepLink,
   createDb,
   BillSessionRepository,
   ChatMemberCacheRepository,
   GroupRepository,
   GroupRosterRepository,
-  listUndeliveredPendingForBill,
   parsePlaceholderInput
 } from "@splitbot/db";
 import type { ParsedReceipt } from "@splitbot/shared";
@@ -1227,15 +1225,6 @@ app.post("/api/bills/:billId/announce", async (c) => {
     return c.json({ error: auth.error }, auth.status);
   }
 
-  const totals = db
-    .query(
-      `SELECT COUNT(*) AS itemCount,
-              COALESCE(SUM(total_price_cents), 0) AS totalCents
-       FROM bill_items
-       WHERE bill_session_id = ?1`
-    )
-    .get(billId) as { itemCount: number; totalCents: number };
-
   const openUrl = buildBillAnnounceOpenUrl({
     botUsername: env.TELEGRAM_BOT_USERNAME,
     shortName: env.TELEGRAM_MINI_APP_SHORT_NAME,
@@ -1244,29 +1233,10 @@ app.post("/api/bills/:billId/announce", async (c) => {
   });
 
   const people = resolveAnnouncePeople(db, billId);
-  const pendingAdded = listUndeliveredPendingForBill(db, billId);
-  const startNudge =
-    pendingAdded.length > 0
-      ? {
-          labels: pendingAdded.map((row) => {
-            const username = row.member_name.trim().startsWith("@")
-              ? row.member_name.trim()
-              : null;
-            return username || row.member_name.trim();
-          }),
-          startLink: buildBotStartDeepLink(
-            env.TELEGRAM_BOT_USERNAME,
-            pendingAdded[0]!.start_payload,
-          ),
-        }
-      : null;
 
   const text = formatBillAnnounceMessage(bill, {
-    itemCount: Number(totals.itemCount) || 0,
-    totalCents: Number(totals.totalCents) || 0,
     openUrl,
     people,
-    startNudge,
   });
   const replyMarkup = buildBillAnnounceReplyMarkup({ openUrl });
 

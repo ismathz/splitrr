@@ -115,22 +115,26 @@ describe("formatAnnouncePersonMention", () => {
 });
 
 describe("formatBillAnnounceMessage", () => {
-  it("includes totals, nice date, people tags, and open url", () => {
+  it("includes title, place, date, people tags, and open url without items/total/DM alerts", () => {
     const text = formatBillAnnounceMessage(bill, {
-      itemCount: 3,
-      totalCents: 1250,
       openUrl: "https://t.me/SplitrrBot/app?startapp=x",
       people: [
         { displayName: "Ada", username: "ada" },
         { displayName: "Bob", telegramUserId: 7 }
       ]
     });
-    expect(text).toContain("Dinner");
-    expect(text).toContain("Date: Fri, Oct 30, 2026");
-    expect(text).toContain("With: @ada, <a href=\"tg://user?id=7\">Bob</a>");
-    expect(text).toContain("USD 12.50");
-    expect(text).toContain("Items: 3");
-    expect(text).toContain("https://t.me/SplitrrBot/app?startapp=x");
+    expect(text).toBe(
+      [
+        "Splitrr · Dinner",
+        "Place: Cafe",
+        "Date: Fri, Oct 30, 2026",
+        'With: @ada, <a href="tg://user?id=7">Bob</a>',
+        "Open: https://t.me/SplitrrBot/app?startapp=x"
+      ].join("\n")
+    );
+    expect(text).not.toContain("Items:");
+    expect(text).not.toContain("Total:");
+    expect(text).not.toContain("DM alerts:");
   });
 
   it("lists placeholders under Waiting on … to join", () => {
@@ -146,20 +150,7 @@ describe("formatBillAnnounceMessage", () => {
     });
     expect(text).toContain("With: @ada");
     expect(text).toContain("Waiting on @cara to join");
-  });
-
-  it("mentions undeliverable DM recipients with a Start deep link", () => {
-    const text = formatBillAnnounceMessage(bill, {
-      people: [{ displayName: "Ada", username: "ada" }],
-      startNudge: {
-        labels: ["@cara", "Bob"],
-        startLink: "https://t.me/SplitrrBot?start=naaaa"
-      }
-    });
-    expect(text).toContain("DM alerts: @cara, Bob");
-    expect(text).toContain(
-      "https://t.me/SplitrrBot?start=naaaa"
-    );
+    expect(text).not.toContain("DM alerts:");
   });
 });
 
