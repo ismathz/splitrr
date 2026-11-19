@@ -137,38 +137,18 @@ export function formatBillAnnounceMessage(
   return lines.join("\n");
 }
 
-/** Inline keyboard for shared bill messages: Join Splitrr + optional Open. */
+/** Inline keyboard for shared bill messages: Open bill only. */
 export function buildBillAnnounceReplyMarkup(input: {
   openUrl?: string | null;
-  joinCallbackData?: string;
-  joinButtonText?: string;
 }):
   | {
-      inline_keyboard: Array<
-        Array<
-          | { text: string; callback_data: string }
-          | { text: string; url: string }
-        >
-      >;
+      inline_keyboard: Array<Array<{ text: string; url: string }>>;
     }
   | undefined {
-  const rows: Array<
-    Array<
-      | { text: string; callback_data: string }
-      | { text: string; url: string }
-    >
-  > = [];
-  const joinData = input.joinCallbackData ?? "roster_join";
-  rows.push([
-    {
-      text: input.joinButtonText ?? "Join Splitrr",
-      callback_data: joinData
-    }
-  ]);
-  if (input.openUrl) {
-    rows.push([{ text: "Open bill", url: input.openUrl }]);
-  }
-  return { inline_keyboard: rows };
+  if (!input.openUrl) return undefined;
+  return {
+    inline_keyboard: [[{ text: "Open bill", url: input.openUrl }]]
+  };
 }
 
 export function buildBillAnnounceOpenUrl(input: {
