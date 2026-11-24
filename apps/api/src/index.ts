@@ -11,6 +11,11 @@ import {
   parsePlaceholderInput
 } from "@splitbot/db";
 import type { ParsedReceipt } from "@splitbot/shared";
+import {
+  sanitizeOptionalUserText,
+  sanitizeUserText,
+  TEXT_LIMITS,
+} from "@splitbot/shared";
 import { inferOcrCharges } from "./ocrCharges";
 import { loadBillCharges, replaceBillCharges } from "./billCharges";
 import { env } from "./env";
@@ -92,10 +97,15 @@ function validateAndSanitizeParsedReceipt(parsed: ParsedReceipt):
   const normalizedRawText = parsed.rawText.trim();
   const confidenceFiltered: ParsedReceipt = {
     ...parsed,
+    merchantName:
+      sanitizeOptionalUserText(
+        parsed.merchantName,
+        TEXT_LIMITS.merchantName,
+      ) ?? undefined,
     items: parsed.items
       .map((item) => ({
         ...item,
-        name: item.name.trim()
+        name: sanitizeUserText(item.name, TEXT_LIMITS.itemName),
       }))
       .filter((item) => item.name.length > 0)
       .filter((item) => item.confidence >= OCR_MIN_ITEM_CONFIDENCE)
@@ -105,9 +115,13 @@ function validateAndSanitizeParsedReceipt(parsed: ParsedReceipt):
   const filteredItems = inferred.items.filter(
     (item) => item.confidence >= OCR_MIN_ITEM_CONFIDENCE
   );
-  const discountAdjustments = inferred.discountAdjustments.filter(
-    (d) => d.confidence >= OCR_MIN_ITEM_CONFIDENCE
-  );
+  const discountAdjustments = inferred.discountAdjustments
+    .filter((d) => d.confidence >= OCR_MIN_ITEM_CONFIDENCE)
+    .map((d) => ({
+      ...d,
+      name:
+        sanitizeUserText(d.name, TEXT_LIMITS.chargeLabel) || "Discount",
+    }));
 
   if (
     !normalizedRawText &&
@@ -372,7 +386,8 @@ app.post("/api/bills", async (c) => {
       currency?: string;
     }>();
 
-    if (!body?.telegramChatId?.trim() || !body?.title?.trim()) {
+    const title = sanitizeUserText(body?.title, TEXT_LIMITS.billTitle);
+    if (!body?.telegramChatId?.trim() || !title) {
       return c.json(
         {
           error: "telegramChatId and title are required",
@@ -384,7 +399,7 @@ app.post("/api/bills", async (c) => {
 
     const groupId = groups.upsertGroup(
       body.telegramChatId.trim(),
-      body.groupTitle?.trim() || "Group"
+      sanitizeUserText(body.groupTitle, TEXT_LIMITS.groupTitle) || "Group"
     );
     const billId = randomUUID();
     const authUser = c.get("telegramUser");
@@ -399,11 +414,11 @@ app.post("/api/bills", async (c) => {
     sessions.create({
       id: billId,
       groupId,
-      title: body.title.trim(),
+      title,
       status: "draft",
       createdByUserId: createdByInternalId ?? undefined,
       billDate: body.billDate,
-      place: body.place ?? null,
+      place: sanitizeOptionalUserText(body.place, TEXT_LIMITS.place),
       currency: body.currency
     });
 
@@ -945,7 +960,7 @@ app.patch("/api/bills/:billId", async (c) => {
       ratePct?: number | null;
     }>;
   }>();
-  const nextTitle = body.title?.trim();
+  const nextTitle = sanitizeUserText(body.title, TEXT_LIMITS.billTitle);
   if (!nextTitle) {
     return c.json({ error: "title is required" }, 400);
   }
@@ -956,6 +971,11 @@ app.patch("/api/bills/:billId", async (c) => {
   if (!exists) {
     return c.json({ error: "Bill not found" }, 404);
   }
+
+  const nextPlace =
+    body.place === undefined
+      ? "__KEEP__"
+      : (sanitizeOptionalUserText(body.place, TEXT_LIMITS.place) ?? "");
 
   db.query(
     `UPDATE bill_sessions
@@ -968,7 +988,7 @@ app.patch("/api/bills/:billId", async (c) => {
     billId,
     nextTitle,
     body.billDate?.trim() || null,
-    body.place === undefined ? "__KEEP__" : (body.place?.trim() ?? ""),
+    nextPlace,
   );
 
   const sessionMeta = db
@@ -1007,7 +1027,7 @@ app.patch("/api/bills/:billId", async (c) => {
     );
 
     for (const item of body.items) {
-      const name = item.name?.trim();
+      const name = sanitizeUserText(item.name, TEXT_LIMITS.itemName);
       const total = Number(item.totalPriceCents);
       if (!name || !Number.isFinite(total) || total <= 0) continue;
       const itemId = item.id ?? randomUUID();
@@ -1017,7 +1037,10 @@ app.patch("/api/bills/:billId", async (c) => {
       ).run(itemId, billId, name, Math.round(total));
 
       for (const rawAssignee of item.assignees ?? []) {
-        const assigneeName = rawAssignee.trim();
+        const assigneeName = sanitizeUserText(
+          rawAssignee,
+          TEXT_LIMITS.memberName,
+        );
         if (!assigneeName) continue;
         const userId = resolveNamedUserId(assigneeName);
         if (!userId) continue;
@@ -1065,8 +1088,13 @@ app.patch("/api/bills/:billId", async (c) => {
     const seen = new Set<string>();
     const nextMembers: string[] = [];
     for (const raw of body.members) {
-      const parsed = parsePlaceholderInput(raw);
-      const memberName = parsed.memberName;
+      const parsed = parsePlaceholderInput(
+        sanitizeUserText(raw, TEXT_LIMITS.memberName),
+      );
+      const memberName = sanitizeUserText(
+        parsed.memberName,
+        TEXT_LIMITS.memberName,
+      );
       if (!memberName) continue;
       const key = memberName.toLowerCase();
       if (seen.has(key)) continue;
@@ -1098,7 +1126,7 @@ app.patch("/api/bills/:billId", async (c) => {
     const derived = new Set<string>();
     for (const item of body.items) {
       for (const raw of item.assignees ?? []) {
-        const name = raw.trim();
+        const name = sanitizeUserText(raw, TEXT_LIMITS.memberName);
         if (name) derived.add(name);
       }
     }
@@ -1486,7 +1514,7 @@ app.get("/api/bills/:billId/payment-status", (c) => {
 app.post("/api/bills/:billId/payment-status", async (c) => {
   const billId = c.req.param("billId");
   const body = await c.req.json<{ name?: string; paid?: boolean }>();
-  const name = body.name?.trim() ?? "";
+  const name = sanitizeUserText(body.name, TEXT_LIMITS.memberName);
   if (!name) {
     return c.json({ error: "name is required" }, 400);
   }

@@ -10,6 +10,7 @@ import {
   GroupRepository,
   GroupRosterRepository
 } from "@splitbot/db";
+import { sanitizeUserText, TEXT_LIMITS } from "@splitbot/shared";
 import { signAvatarRequest, verifyAvatarRequest } from "./avatarSignature";
 import { createChatMembersStorageAdapter } from "./chatMembersStorage";
 import { env } from "./env";
@@ -275,7 +276,10 @@ bot.command("paydetails", async (ctx) => {
     return;
   }
   markDmStarted(db, ctx.from);
-  const text = (ctx.match ?? "").toString().trim();
+  const text = sanitizeUserText(
+    (ctx.match ?? "").toString(),
+    TEXT_LIMITS.paymentDetails,
+  );
   if (!text) {
     db.query(
       `UPDATE users SET payment_details = NULL WHERE telegram_user_id = ?1`,
@@ -285,7 +289,7 @@ bot.command("paydetails", async (ctx) => {
     );
     return;
   }
-  const clipped = text.slice(0, 200);
+  const clipped = text;
   db.query(
     `INSERT INTO users (telegram_user_id, username, first_name, last_name, payment_details, dm_started_at)
      VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))

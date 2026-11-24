@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
+import { sanitizeOptionalUserText, TEXT_LIMITS } from "@splitbot/shared";
 
 export type BillChargeInput = {
   id?: string;
@@ -48,10 +49,10 @@ export function replaceBillCharges(
     const amount = Math.round(Number(raw.amountCents));
     if (!Number.isFinite(amount) || amount === 0) continue;
     const chargeType = normalizeChargeType(String(raw.chargeType ?? "custom"));
-    const label =
-      typeof raw.label === "string" && raw.label.trim()
-        ? raw.label.trim().slice(0, 120)
-        : null;
+    const label = sanitizeOptionalUserText(
+      raw.label,
+      TEXT_LIMITS.chargeLabel,
+    );
     const rateRaw = raw.ratePct;
     const ratePct =
       typeof rateRaw === "number" && Number.isFinite(rateRaw) && rateRaw > 0

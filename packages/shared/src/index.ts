@@ -2,6 +2,7 @@ export * from "./types";
 export * from "./currency";
 export * from "./allocateCents";
 export * from "./billShares";
+export * from "./sanitizeText";
 export * from "./telegramWebAppAuth";
 export * from "./telegramToken";
 export * from "./widgets";

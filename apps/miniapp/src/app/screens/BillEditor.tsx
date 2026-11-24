@@ -10,6 +10,9 @@ import {
   allocateCentsEqual,
   BILL_CURRENCY_OPTIONS,
   normalizeCurrencyCode,
+  sanitizeOptionalUserText,
+  sanitizeUserText,
+  TEXT_LIMITS,
 } from "@splitbot/shared";
 import useEmblaCarousel from "embla-carousel-react";
 import {
@@ -129,7 +132,7 @@ function isNameInGroup(name: string, groupMembers: string[]): boolean {
 
 /** Prefer the group's spelling when the typed name matches case-insensitively. */
 function canonicalMemberName(raw: string, groupMembers: string[]): string {
-  const t = raw.trim();
+  const t = sanitizeUserText(raw, TEXT_LIMITS.memberName);
   if (!t) return "";
   const lower = t.toLowerCase();
   const match = groupMembers.find((g) => g.toLowerCase() === lower);
@@ -536,16 +539,22 @@ export function BillEditor(props: BillEditorProps) {
         const parsed = await runReceiptOcr(splitbotApiBase, billId, storageKey);
         if (cancelled) return;
         setCurrencyCode(normalizeCurrencyCode(parsed.currency));
-        const merchant = parsed.merchantName?.trim();
+        const merchant = sanitizeUserText(
+          parsed.merchantName,
+          TEXT_LIMITS.billTitle,
+        );
         if (merchant) {
           setBillTitle(merchant);
         } else {
-          setBillTitle((prev) => prev.trim() || title);
+          setBillTitle(
+            (prev) =>
+              sanitizeUserText(prev, TEXT_LIMITS.billTitle) || title,
+          );
         }
         setItems(
           parsed.items.map((it, i) => ({
             id: `ocr-${billId}-${i}`,
-            name: it.name,
+            name: sanitizeUserText(it.name, TEXT_LIMITS.itemName) || "Item",
             totalPriceCents: it.totalPriceCents,
             assignees: [],
           })),
@@ -554,7 +563,9 @@ export function BillEditor(props: BillEditorProps) {
           parsed.discountAdjustments ?? []
         ).map((adjustment, i) => ({
           id: `ocr-discount-${billId}-${i}`,
-          name: adjustment.name || "Discount",
+          name:
+            sanitizeUserText(adjustment.name, TEXT_LIMITS.chargeLabel) ||
+            "Discount",
           amountType: "fixed" as const,
           value: adjustment.amountCents / 100,
         }));
@@ -1167,21 +1178,29 @@ export function BillEditor(props: BillEditorProps) {
       chargesPayload.push({
         chargeType: "custom",
         amountCents: row.cents,
-        label: row.name,
+        label:
+          sanitizeUserText(row.name, TEXT_LIMITS.chargeLabel) || "Adjustment",
         ratePct: row.amountType === "percentage" ? row.value : null,
       });
     }
 
+    const safePlace = sanitizeOptionalUserText(billPlace, TEXT_LIMITS.place);
     const persistPayload = {
       billDate,
-      place: billPlace.trim() || null,
-      members: billMembersOrdered,
-      items: items.map((it) => ({
-        id: it.id,
-        name: it.name,
-        totalPriceCents: it.totalPriceCents,
-        assignees: it.assignees,
-      })),
+      place: safePlace,
+      members: billMembersOrdered.map((m) =>
+        sanitizeUserText(m, TEXT_LIMITS.memberName),
+      ).filter(Boolean),
+      items: items
+        .map((it) => ({
+          id: it.id,
+          name: sanitizeUserText(it.name, TEXT_LIMITS.itemName),
+          totalPriceCents: it.totalPriceCents,
+          assignees: (it.assignees ?? [])
+            .map((a) => sanitizeUserText(a, TEXT_LIMITS.memberName))
+            .filter(Boolean),
+        }))
+        .filter((it) => it.name.length > 0),
       charges: chargesPayload,
     };
 
@@ -1189,7 +1208,8 @@ export function BillEditor(props: BillEditorProps) {
     if (isEditMode && editingBillId && splitbotApiBase) {
       setIsSavingBill(true);
       try {
-        const normalizedTitle = billTitle.trim() || "Untitled bill";
+        const normalizedTitle =
+          sanitizeUserText(billTitle, TEXT_LIMITS.billTitle) || "Untitled bill";
         await updateBillDetails(splitbotApiBase, editingBillId, {
           title: normalizedTitle,
           ...persistPayload,
@@ -1207,7 +1227,8 @@ export function BillEditor(props: BillEditorProps) {
     if (serverBillId && splitbotApiBase) {
       setIsSavingBill(true);
       try {
-        const normalizedTitle = billTitle.trim() || "Untitled bill";
+        const normalizedTitle =
+          sanitizeUserText(billTitle, TEXT_LIMITS.billTitle) || "Untitled bill";
         await updateBillDetails(splitbotApiBase, serverBillId, {
           title: normalizedTitle,
           ...persistPayload,
@@ -1225,14 +1246,19 @@ export function BillEditor(props: BillEditorProps) {
     setIsSavingBill(true);
     try {
       const day = new Date().toISOString().slice(0, 10);
-      const title = billTitle.trim() || `Bill ${day}`;
+      const title =
+        sanitizeUserText(billTitle, TEXT_LIMITS.billTitle) || `Bill ${day}`;
       const { billId } = await createBillSession(splitbotApiBase, {
         telegramChatId: billApiContext.telegramChatId,
-        groupTitle: billApiContext.groupTitle,
+        groupTitle:
+          sanitizeUserText(
+            billApiContext.groupTitle,
+            TEXT_LIMITS.groupTitle,
+          ) || "Group",
         title,
         createdByUserId: launchCtx.currentUser?.id,
         billDate: billDate || day,
-        place: billPlace.trim() || null,
+        place: safePlace,
         currency: normalizeCurrencyCode(currencyCode),
       });
       setServerBillId(billId);
@@ -1290,6 +1316,10 @@ export function BillEditor(props: BillEditorProps) {
     <input
       value={billTitle}
       onChange={(e) => setBillTitle(e.target.value)}
+      onBlur={() =>
+        setBillTitle((prev) => sanitizeUserText(prev, TEXT_LIMITS.billTitle))
+      }
+      maxLength={TEXT_LIMITS.billTitle}
       className="h-9 w-full rounded-md border bg-background px-3 text-lg font-semibold shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
       placeholder={isEditMode ? "Bill title" : "Bill name"}
       aria-label="Bill name"
@@ -1307,6 +1337,12 @@ export function BillEditor(props: BillEditorProps) {
       <input
         value={billPlace}
         onChange={(e) => setBillPlace(e.target.value)}
+        onBlur={() =>
+          setBillPlace(
+            (prev) => sanitizeUserText(prev, TEXT_LIMITS.place) || "",
+          )
+        }
+        maxLength={TEXT_LIMITS.place}
         placeholder="Place (optional)"
         className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-xs"
       />
@@ -1512,8 +1548,12 @@ export function BillEditor(props: BillEditorProps) {
                         autoFocus
                         value={draftItemName}
                         onChange={(e) => setDraftItemName(e.target.value)}
+                        maxLength={TEXT_LIMITS.itemName}
                         onBlur={() => {
-                          const nextName = draftItemName.trim();
+                          const nextName = sanitizeUserText(
+                            draftItemName,
+                            TEXT_LIMITS.itemName,
+                          );
                           setEditingItemId(null);
                           setEditingField(null);
 
@@ -2378,6 +2418,7 @@ export function BillEditor(props: BillEditorProps) {
                   setManualMemberInput(e.target.value);
                   setManualMemberError(null);
                 }}
+                maxLength={TEXT_LIMITS.memberName}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
