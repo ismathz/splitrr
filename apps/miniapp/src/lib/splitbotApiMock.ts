@@ -45,6 +45,7 @@ type ApiBillHistoryEntry = {
   place: string | null;
   settled: boolean;
   createdAt?: string;
+  members?: string[];
 };
 
 type ApiBillPaymentStatusMember = {
@@ -267,6 +268,7 @@ export async function mockGetGroupHistoryByTelegramChatId(): Promise<{
       place: bill.place,
       settled: bill.settled,
       createdAt: bill.createdAt,
+      members: bill.members ?? [],
     }));
   return { bills: billsList };
 }

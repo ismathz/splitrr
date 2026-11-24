@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
+import { BillStatusBadge } from "@/components/BillRow";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
@@ -13,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -34,15 +36,8 @@ import {
 import { mockBills } from "../billDevMocks";
 import { isDevMockDataEnabled } from "@/lib/devFlags";
 import { BillEditor } from "./BillEditor";
-
-const billStatusBadgeClass: Record<BillDetails["status"], string> = {
-  draft: "bg-sky-500/15 text-sky-700",
-  pending: "bg-amber-500/15 text-amber-700",
-  completed: "bg-emerald-500/15 text-emerald-700",
-};
 import { getItemDisplayEmoji } from "@/lib/itemEmoji";
-import { ArrowLeftIcon, EllipsisVertical } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import {
   announceBillToGroup,
@@ -60,90 +55,7 @@ import {
 } from "@/lib/telegramGroupMembers";
 import { useTelegramLaunchContext } from "@/lib/telegramLaunchContext";
 import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
-
-function getInitials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const initials = parts
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() ?? "")
-    .join("");
-  return initials || name.slice(0, 2).toUpperCase();
-}
-
-function getAvatarColors(name: string) {
-  const seed = name.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-  const hue = seed % 360;
-  const lightness = 38 + (seed % 18);
-  const backgroundColor = `hsl(${hue} 80% ${lightness}%)`;
-  const foregroundColor = lightness > 50 ? "#111827" : "#ffffff";
-  return { backgroundColor, foregroundColor };
-}
-
-function rgb24IntToCss(n: number) {
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  return { r, g, b, css: `rgb(${r} ${g} ${b})` };
-}
-
-function pickReadableForegroundFromRgb(r: number, g: number, b: number) {
-  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-  return lum > 0.55 ? "#111827" : "#ffffff";
-}
-
-function MemberAvatar({
-  name,
-  avatarBgColors,
-  photoUrl,
-}: {
-  name: string;
-  avatarBgColors?: number[];
-  photoUrl?: string;
-}) {
-  const [imgFailed, setImgFailed] = useState(false);
-
-  if (photoUrl && !imgFailed) {
-    return (
-      <img
-        src={photoUrl}
-        alt=""
-        className="h-6 w-6 shrink-0 rounded-full object-cover"
-        onError={() => setImgFailed(true)}
-      />
-    );
-  }
-
-  const initials = getInitials(name);
-  const bg = avatarBgColors && avatarBgColors.length ? avatarBgColors : null;
-
-  let backgroundColor: string | undefined;
-  let backgroundImage: string | undefined;
-  let foregroundColor: string;
-
-  if (bg && bg.length) {
-    const c0 = rgb24IntToCss(bg[0]);
-    const c1 = bg.length >= 2 ? rgb24IntToCss(bg[1]) : null;
-    backgroundColor = c0.css;
-    foregroundColor = pickReadableForegroundFromRgb(c0.r, c0.g, c0.b);
-    if (c1) {
-      backgroundImage = `linear-gradient(135deg, ${c0.css}, ${c1.css})`;
-    }
-  } else {
-    const v = getAvatarColors(name);
-    backgroundColor = v.backgroundColor;
-    foregroundColor = v.foregroundColor;
-  }
-
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold"
-      style={{ backgroundColor, backgroundImage, color: foregroundColor }}
-    >
-      {initials}
-    </span>
-  );
-}
+import { MemberAvatar } from "@/components/MemberAvatar";
 
 function uniqueMembersInOrder(items: Item[]): string[] {
   const seen = new Set<string>();
@@ -616,14 +528,10 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
             onClick={() => navigate({ to: "/" })}
             className="px-2"
           >
-            <HugeiconsIcon
-              icon={ArrowLeftIcon}
-              strokeWidth={1.8}
-              className="size-5"
-            />
+            <Icon name="IconArrowLeft" size={20} />
           </Button>
         </div>
-        <Card className="rounded-xl border p-3">
+        <Card className="rounded-[22px] border-0 p-4">
           <div className="space-y-1">
             <CardTitle className="text-xl">Loading bill…</CardTitle>
             <CardDescription>Fetching latest details.</CardDescription>
@@ -642,14 +550,10 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
             onClick={() => navigate({ to: "/" })}
             className="px-2"
           >
-            <HugeiconsIcon
-              icon={ArrowLeftIcon}
-              strokeWidth={1.8}
-              className="size-5"
-            />
+            <Icon name="IconArrowLeft" size={20} />
           </Button>
         </div>
-        <Card className="rounded-xl border p-3">
+        <Card className="rounded-[22px] border-0 p-4">
           <div className="space-y-1">
             <CardTitle className="text-xl">Bill not found</CardTitle>
             <CardDescription>Could not load this bill.</CardDescription>
@@ -700,11 +604,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
             onClick={() => navigate({ to: "/" })}
             className="px-2"
           >
-            <HugeiconsIcon
-              icon={ArrowLeftIcon}
-              strokeWidth={1.8}
-              className="size-5"
-            />
+            <Icon name="IconArrowLeft" size={20} />
           </Button>
           <Button
             variant="outline"
@@ -734,11 +634,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                 render={<Button variant="outline" size="icon" />}
                 aria-label="Open bill actions"
               >
-                <HugeiconsIcon
-                  icon={EllipsisVertical}
-                  strokeWidth={1.8}
-                  className="size-5"
-                />
+                <Icon name="IconDotGrid1x3Vertical" size={20} />
               </PopoverTrigger>
               <PopoverContent className="w-40 p-1">
                 <Button
@@ -764,8 +660,9 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
       <div className="space-y-4">
         <div className="min-w-0 space-y-1">
           {isEditingTitle ? (
-            <input
+            <Input
               autoFocus
+              variant="title"
               value={draftTitle}
               disabled={isSavingTitle}
               onChange={(e) => setDraftTitle(e.target.value)}
@@ -779,7 +676,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                   setDraftTitle(bill.title);
                 }
               }}
-              className="h-9 w-full rounded-md border bg-background px-3 text-xl font-semibold shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="h-11 text-2xl"
               aria-label="Bill title"
             />
           ) : (
@@ -791,7 +688,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                 setIsEditingTitle(true);
               }}
             >
-              <CardTitle className="text-xl hover:underline">
+              <CardTitle className="text-2xl font-medium tracking-[-0.02em] hover:underline">
                 {bill.title}
               </CardTitle>
             </button>
@@ -803,23 +700,18 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
             <span>{formatBillDateLabel(bill.billDate)}</span>
             {bill.place ? (
               <>
-                <span className="text-border">·</span>
+                <span className="text-white/20">·</span>
                 <span>{bill.place}</span>
               </>
             ) : null}
-            <span className="text-border">·</span>
-            <Badge
-              variant="secondary"
-              className={cn(billStatusBadgeClass[bill.status], "capitalize")}
-            >
-              {bill.status}
-            </Badge>
+            <span className="text-white/20">·</span>
+            <BillStatusBadge status={bill.status} />
           </CardDescription>
         </div>
 
         <div className="space-y-2">
           {bill.items.map((item) => (
-            <Card key={item.id} className="rounded-xl border p-3">
+            <Card key={item.id} className="rounded-[22px] border-0 p-3.5">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span
@@ -828,9 +720,11 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                   >
                     {getItemDisplayEmoji(item)}
                   </span>
-                  <span className="font-medium">{item.name}</span>
+                  <span className="font-medium tracking-[-0.01em]">
+                    {item.name}
+                  </span>
                 </div>
-                <Badge>
+                <Badge className="tabular-nums">
                   {formatBillMoney(bill.currency, item.totalPriceCents)}
                 </Badge>
               </div>
@@ -850,29 +744,29 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
           <div>
             <CardTitle className="text-xl">Charges & tax</CardTitle>
           </div>
-          <Card className="rounded-xl border p-3">
+          <Card className="rounded-[22px] border-0 p-3.5">
             <dl className="space-y-2 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-muted-foreground">Subtotal</dt>
-                <dd className="font-medium">
+                <dd className="font-medium tabular-nums">
                   {formatBillMoney(bill.currency, subtotalCents)}
                 </dd>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-muted-foreground">Tax</dt>
-                <dd className="font-medium">
+                <dd className="font-medium tabular-nums">
                   {formatBillMoney(bill.currency, taxCents)}
                 </dd>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-muted-foreground">Additional charges</dt>
-                <dd className="font-medium">
+                <dd className="font-medium tabular-nums">
                   {formatBillMoney(bill.currency, additionalChargesCents)}
                 </dd>
               </div>
-              <div className="flex items-center justify-between gap-3 border-t pt-2">
-                <dt className="font-semibold">Total</dt>
-                <dd className="font-semibold">
+              <div className="flex items-center justify-between gap-3 border-t border-white/[0.07] pt-2">
+                <dt className="font-medium tracking-[-0.01em]">Total</dt>
+                <dd className="font-medium tabular-nums">
                   {formatBillMoney(bill.currency, grandTotalCents)}
                 </dd>
               </div>
@@ -889,9 +783,9 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
               </CardDescription>
             ) : null}
           </div>
-          <Card className="rounded-xl border p-0 overflow-hidden">
+          <Card className="overflow-hidden rounded-[22px] border-0 p-0">
             {membersOrdered.length > 0 ? (
-              <ul className="divide-y">
+              <ul className="divide-y divide-white/[0.07]">
                 {membersOrdered.map((name) => {
                   const cents = balances.get(name) ?? 0;
                   const paid = paidMemberNames.has(name);
@@ -901,7 +795,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                     <li key={name}>
                       <label
                         htmlFor={id}
-                        className="flex cursor-pointer items-center justify-between gap-3 px-3 py-3 hover:bg-muted/40"
+                        className="flex cursor-pointer items-center justify-between gap-3 px-3.5 py-3 transition-colors hover:bg-white/[0.04]"
                       >
                         <span className="flex min-w-0 items-center gap-3">
                           <Checkbox
@@ -914,8 +808,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                             disabled={savingPaidMemberNames.has(name)}
                             className={cn(
                               "size-6 rounded-full",
-                              paid &&
-                                "border-green-600 bg-green-600 text-success-foreground",
+                              paid && "border-success bg-success text-white",
                             )}
                           />
                           <MemberAvatar
@@ -924,16 +817,17 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                             photoUrl={resolvePhotoUrlForName(name)}
                           />
                           <span
-                            className={`truncate font-medium ${paid ? "text-muted-foreground line-through" : ""}`}
+                            className={`truncate font-medium tracking-[-0.01em] ${paid ? "text-muted-foreground line-through" : ""}`}
                           >
                             {name}
                           </span>
                         </span>
                         <Badge
                           variant="secondary"
-                          className={
-                            paid ? "opacity-60 line-through" : undefined
-                          }
+                          className={cn(
+                            "tabular-nums",
+                            paid ? "opacity-60 line-through" : undefined,
+                          )}
                         >
                           {formatBillMoney(bill.currency, cents)}
                         </Badge>
@@ -943,7 +837,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                 })}
               </ul>
             ) : (
-              <p className="px-3 py-4 text-sm text-muted-foreground">
+              <p className="px-3.5 py-4 text-sm text-muted-foreground">
                 No assigned members yet.
               </p>
             )}
@@ -993,11 +887,11 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
         <div
           role="status"
           aria-live="polite"
-          className={`fixed bottom-4 left-1/2 z-50 w-[min(92vw,28rem)] -translate-x-1/2 rounded-lg border bg-background px-3 py-2 text-sm shadow-lg ${
+          className={`fixed bottom-4 left-1/2 z-50 w-[min(92vw,28rem)] -translate-x-1/2 rounded-full border bg-[#1c1c1c] px-4 py-2.5 text-sm shadow-none ${
             paymentToastMessage ||
             (announceToastMessage && announceToastMessage !== "Shared to the group.")
               ? "border-destructive/30 text-destructive"
-              : "border-border text-foreground"
+              : "border-white/[0.1] text-foreground"
           }`}
         >
           {paymentToastMessage ?? announceToastMessage}

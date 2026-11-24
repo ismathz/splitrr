@@ -1,15 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  FileEmpty01FreeIcons,
-  ImageUploadIcon,
-  Scan,
-} from "@hugeicons/core-free-icons";
-
-import { Badge } from "@/components/ui/badge";
+import { BillRow } from "@/components/BillRow";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import {
   Card,
   CardContent,
@@ -18,10 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-import {
-  formatBillDateLabel,
-  type BillDetails,
-} from "../billTypes";
+import { type BillDetails } from "../billTypes";
 import { mockBills } from "../billDevMocks";
 import { isDevMockDataEnabled } from "@/lib/devFlags";
 import { pickReceiptImage } from "@/lib/pickReceiptImage";
@@ -33,50 +24,6 @@ import {
 import { useTelegramLaunchContext } from "@/lib/telegramLaunchContext";
 
 const BILL_HISTORY_PREVIEW_LIMIT = 4;
-
-const billStatusBadgeClass: Record<BillDetails["status"], string> = {
-  draft: "bg-sky-500/15 text-sky-700",
-  pending: "bg-amber-500/15 text-amber-700",
-  completed: "bg-emerald-500/15 text-emerald-700",
-};
-
-function BillRow({ bill, onView }: { bill: BillDetails; onView: () => void }) {
-  return (
-    <Card
-      className="cursor-pointer rounded-lg border p-3 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      onClick={onView}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onView();
-        }
-      }}
-      role="button"
-      tabIndex={0}
-    >
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="truncate font-medium">{bill.title}</span>
-          <Badge
-            variant="secondary"
-            className={`${billStatusBadgeClass[bill.status]} capitalize`}
-          >
-            {bill.status}
-          </Badge>
-        </div>
-        <div className="mt-1 text-xs text-muted-foreground">
-          <span>{formatBillDateLabel(bill.billDate)}</span>
-          {bill.place ? (
-            <>
-              <span className="mx-1.5 text-border">·</span>
-              <span>{bill.place}</span>
-            </>
-          ) : null}
-        </div>
-      </div>
-    </Card>
-  );
-}
 
 export function HomeScreen() {
   const navigate = useNavigate();
@@ -114,6 +61,7 @@ export function HomeScreen() {
           bills.map((bill) => ({
             ...bill,
             place: bill.place ?? null,
+            members: bill.members ?? [],
             items: [],
           })),
         );
@@ -161,9 +109,9 @@ export function HomeScreen() {
 
   return (
     <div className="space-y-6">
-      <Card className="border-dashed">
+      <Card className="rounded-[24px]">
         <CardHeader>
-          <CardTitle>Get started</CardTitle>
+          <CardTitle className="text-xl">Get started</CardTitle>
           <CardDescription>
             Scan with camera, upload from your gallery, or start from an empty
             bill.
@@ -178,7 +126,7 @@ export function HomeScreen() {
             }}
             size="lg"
           >
-            <HugeiconsIcon icon={Scan} strokeWidth={1.8} className="size-5" />
+            <Icon name="IconScanCode" size={20} />
             Scan receipt
           </Button>
 
@@ -192,11 +140,7 @@ export function HomeScreen() {
               }}
               size="lg"
             >
-              <HugeiconsIcon
-                icon={ImageUploadIcon}
-                strokeWidth={1.8}
-                className="size-5"
-              />
+              <Icon name="IconAddImage" size={20} />
               Upload photo
             </Button>
 
@@ -207,11 +151,7 @@ export function HomeScreen() {
               onClick={goToNewBillScratch}
               size="lg"
             >
-              <HugeiconsIcon
-                icon={FileEmpty01FreeIcons}
-                strokeWidth={1.8}
-                className="size-5"
-              />
+              <Icon name="IconPageEmpty" size={20} />
               Start empty
             </Button>
           </div>
@@ -221,7 +161,7 @@ export function HomeScreen() {
         <div>
           <div className="flex items-end justify-between gap-3">
             <div className="space-y-1">
-              <CardTitle>Bill history</CardTitle>
+              <CardTitle className="text-xl">Bill history</CardTitle>
               <CardDescription>
                 {showingDevMocks
                   ? "Dev mock history (VITE_SPLITBOT_USE_MOCK_DATA)."
@@ -238,7 +178,7 @@ export function HomeScreen() {
               </Button>
             ) : null}
           </div>
-          <div className="space-y-2 mt-3">
+          <div className="mt-3 space-y-2">
             {billHistoryPreview.map((bill) => (
               <BillRow
                 key={bill.id}
@@ -250,7 +190,7 @@ export function HomeScreen() {
         </div>
       ) : null}
       {!bills.length ? (
-        <Card className="rounded-lg border p-4">
+        <Card className="rounded-2xl p-4">
           <CardTitle className="text-base">
             {isLoadingHistory ? "Loading bills..." : "No bills yet"}
           </CardTitle>

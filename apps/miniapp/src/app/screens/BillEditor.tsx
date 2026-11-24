@@ -33,8 +33,11 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 
+import { format, isValid, parse } from "date-fns";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import {
   Card,
   CardContent,
@@ -44,6 +47,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import AutoAnimateContainer from "@/components/AutoAnimateContainer";
 import { FormErrorAlert } from "@/components/FormErrorAlert";
+import { Input } from "@/components/ui/input";
 import { Toggle } from "@/components/ui/toggle";
 import {
   Dialog,
@@ -62,6 +66,11 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
 
@@ -86,44 +95,17 @@ import {
   uploadReceipt,
 } from "@/lib/splitbotApi";
 import { getItemDisplayEmoji } from "@/lib/itemEmoji";
-import {
-  ArrowDown01Icon,
-  ArrowLeftIcon,
-  DeleteIcon,
-  DragDropVerticalIcon,
-  Tick02Icon,
-  UserGroupIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { Icon } from "@/components/ui/icon";
+import { MemberAvatar } from "@/components/MemberAvatar";
 
-function getInitials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const initials = parts
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() ?? "")
-    .join("");
-  return initials || name.slice(0, 2).toUpperCase();
+function parseBillDate(value: string): Date | undefined {
+  if (!value.trim()) return undefined;
+  const parsed = parse(value, "yyyy-MM-dd", new Date());
+  return isValid(parsed) ? parsed : undefined;
 }
 
-function getAvatarColors(name: string) {
-  const seed = name.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-  const hue = seed % 360;
-  const lightness = 38 + (seed % 18);
-  const backgroundColor = `hsl(${hue} 80% ${lightness}%)`;
-  const foregroundColor = lightness > 50 ? "#111827" : "#ffffff";
-  return { backgroundColor, foregroundColor };
-}
-
-function rgb24IntToCss(n: number) {
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  return { r, g, b, css: `rgb(${r} ${g} ${b})` };
-}
-
-function pickReadableForegroundFromRgb(r: number, g: number, b: number) {
-  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-  return lum > 0.55 ? "#111827" : "#ffffff";
+function formatBillDateValue(date: Date): string {
+  return format(date, "yyyy-MM-dd");
 }
 
 function isNameInGroup(name: string, groupMembers: string[]): boolean {
@@ -138,60 +120,6 @@ function canonicalMemberName(raw: string, groupMembers: string[]): string {
   const lower = t.toLowerCase();
   const match = groupMembers.find((g) => g.toLowerCase() === lower);
   return match ?? t;
-}
-
-function MemberAvatar({
-  name,
-  avatarBgColors,
-  photoUrl,
-}: {
-  name: string;
-  avatarBgColors?: number[];
-  photoUrl?: string;
-}) {
-  const [imgFailed, setImgFailed] = useState(false);
-
-  if (photoUrl && !imgFailed) {
-    return (
-      <img
-        src={photoUrl}
-        alt=""
-        className="h-6 w-6 shrink-0 rounded-full object-cover"
-        onError={() => setImgFailed(true)}
-      />
-    );
-  }
-
-  const initials = getInitials(name);
-  const bg = avatarBgColors && avatarBgColors.length ? avatarBgColors : null;
-
-  let backgroundColor: string | undefined;
-  let backgroundImage: string | undefined;
-  let foregroundColor: string;
-
-  if (bg && bg.length) {
-    const c0 = rgb24IntToCss(bg[0]);
-    const c1 = bg.length >= 2 ? rgb24IntToCss(bg[1]) : null;
-    backgroundColor = c0.css;
-    foregroundColor = pickReadableForegroundFromRgb(c0.r, c0.g, c0.b);
-    if (c1) {
-      backgroundImage = `linear-gradient(135deg, ${c0.css}, ${c1.css})`;
-    }
-  } else {
-    const v = getAvatarColors(name);
-    backgroundColor = v.backgroundColor;
-    foregroundColor = v.foregroundColor;
-  }
-
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold"
-      style={{ backgroundColor, backgroundImage, color: foregroundColor }}
-    >
-      {initials}
-    </span>
-  );
 }
 
 function MembersCarousel({
@@ -278,11 +206,7 @@ function SortableChargeRow({
           {...attributes}
           {...listeners}
         >
-          <HugeiconsIcon
-            icon={DragDropVerticalIcon}
-            strokeWidth={3}
-            className="size-6"
-          />
+          <Icon name="IconChevronGrabberVertical" size={24} />
         </button>
         <div className="min-w-0 flex-1">{children}</div>
       </div>
@@ -361,8 +285,6 @@ export function BillEditor(props: BillEditorProps) {
   const {
     members: groupMembers,
     isLoading: groupMembersLoading,
-    memberCount: groupMemberCount,
-    unseenCount: groupUnseenCount,
     status: groupRosterStatus,
     statusMessage: groupRosterStatusMessage,
   } = useTelegramGroupMembers();
@@ -439,6 +361,7 @@ export function BillEditor(props: BillEditorProps) {
   });
   const [membersDrawerOpen, setMembersDrawerOpen] = useState(false);
   const [currencyDrawerOpen, setCurrencyDrawerOpen] = useState(false);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [currencyFilter, setCurrencyFilter] = useState("");
   const [manualMemberInput, setManualMemberInput] = useState("");
   const [manualMemberError, setManualMemberError] = useState<string | null>(
@@ -1317,28 +1240,58 @@ export function BillEditor(props: BillEditorProps) {
   const backLabel = props.backLabel ?? (isEditMode ? "Back" : "Back to home");
 
   const headerTitleNode = (
-    <input
+    <Input
+      variant="title"
       value={billTitle}
       onChange={(e) => setBillTitle(e.target.value)}
       onBlur={() =>
         setBillTitle((prev) => sanitizeUserText(prev, TEXT_LIMITS.billTitle))
       }
       maxLength={TEXT_LIMITS.billTitle}
-      className="h-9 w-full rounded-md border bg-background px-3 text-lg font-semibold shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
       placeholder={isEditMode ? "Bill title" : "Bill name"}
       aria-label="Bill name"
     />
   );
 
+  const selectedBillDate = parseBillDate(billDate);
+
   const headerDescriptionNode = (
     <CardDescription className="flex flex-wrap items-center gap-2">
-      <input
-        type="date"
-        value={billDate}
-        onChange={(e) => setBillDate(e.target.value)}
-        className="h-8 rounded-md border bg-background px-2 text-xs"
-      />
-      <input
+      <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-empty={!selectedBillDate}
+              className="w-auto justify-start rounded-[12px] text-left font-normal data-[empty=true]:text-muted-foreground"
+              aria-label="Bill date"
+            />
+          }
+        >
+          <Icon name="IconCalendar" size={16} />
+          {selectedBillDate ? (
+            format(selectedBillDate, "MMM d, yyyy")
+          ) : (
+            <span>Pick a date</span>
+          )}
+        </PopoverTrigger>
+        <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+          <Calendar
+            mode="single"
+            selected={selectedBillDate}
+            defaultMonth={selectedBillDate}
+            onSelect={(date) => {
+              if (!date) return;
+              setBillDate(formatBillDateValue(date));
+              setDatePickerOpen(false);
+            }}
+          />
+        </PopoverContent>
+      </Popover>
+      <Input
+        variant="compact"
         value={billPlace}
         onChange={(e) => setBillPlace(e.target.value)}
         onBlur={() =>
@@ -1348,17 +1301,8 @@ export function BillEditor(props: BillEditorProps) {
         }
         maxLength={TEXT_LIMITS.place}
         placeholder="Place (optional)"
-        className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-xs"
+        className="min-w-0 flex-1"
       />
-      {!isEditMode ? (
-        <span className="w-full text-xs text-muted-foreground">
-          {groupMembers.length > 0
-            ? `You're on this bill — tap Members to add others (seen ${groupMembers.length}${
-                groupMemberCount != null ? ` of ${groupMemberCount}` : ""
-              }).`
-            : "Tap Add members to pick from the group roster, or add someone by name."}
-        </span>
-      ) : null}
     </CardDescription>
   );
 
@@ -1372,11 +1316,7 @@ export function BillEditor(props: BillEditorProps) {
               onClick={() => props.onBack?.()}
               className="w-max"
             >
-              <HugeiconsIcon
-                icon={ArrowLeftIcon}
-                strokeWidth={1.8}
-                className="size-5"
-              />
+              <Icon name="IconArrowLeft" size={20} />
               {backLabel}
             </Button>
           ) : null}
@@ -1393,7 +1333,7 @@ export function BillEditor(props: BillEditorProps) {
       </div>
 
       {showOnlyOcrStatus ? (
-        <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+        <div className="rounded-[22px] border border-primary/25 bg-primary/10 p-4">
           {isOcrProcessing ? (
             <div className="flex items-center gap-3">
               <div className="flex items-end gap-1" aria-hidden>
@@ -1415,7 +1355,7 @@ export function BillEditor(props: BillEditorProps) {
           ) : null}
           {ocrPhase === "error" ? (
             <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">
+              <p className="text-sm font-medium tracking-[-0.01em] text-foreground">
                 Couldn&apos;t scan the receipt
               </p>
               <FormErrorAlert message={ocrError} />
@@ -1432,7 +1372,7 @@ export function BillEditor(props: BillEditorProps) {
             {isFromReceiptScan ? (
               <div className="space-y-1 pt-1">
                 {isOcrProcessing ? (
-                  <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+                  <div className="rounded-2xl border border-primary/25 bg-primary/10 p-3">
                     <div className="flex items-center gap-3">
                       <div className="flex items-end gap-1" aria-hidden>
                         <span className="size-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]"></span>
@@ -1480,11 +1420,7 @@ export function BillEditor(props: BillEditorProps) {
                 className="flex-1 shrink-0 sm:w-auto"
                 onClick={openMembersDrawer}
               >
-                <HugeiconsIcon
-                  icon={UserGroupIcon}
-                  strokeWidth={1.8}
-                  className="size-5"
-                />
+                <Icon name="IconPeople" size={20} />
                 Add members
               </Button>
             ) : (
@@ -1494,11 +1430,7 @@ export function BillEditor(props: BillEditorProps) {
                 className="flex-1"
                 onClick={openMembersDrawer}
               >
-                <HugeiconsIcon
-                  icon={UserGroupIcon}
-                  strokeWidth={1.8}
-                  className="size-5"
-                />
+                <Icon name="IconPeople" size={20} />
                 Members
                 <Badge variant="secondary" className="ml-1">
                   {billMembersOrdered.length}
@@ -1510,7 +1442,7 @@ export function BillEditor(props: BillEditorProps) {
                 type="button"
                 id="bill-currency"
                 variant="outline"
-                className="h-9 w-full max-w-max justify-between gap-2 font-normal"
+                className="h-9 w-full max-w-max justify-between gap-2 rounded-[12px] font-normal"
                 aria-expanded={currencyDrawerOpen}
                 aria-haspopup="dialog"
                 onClick={() => {
@@ -1521,10 +1453,10 @@ export function BillEditor(props: BillEditorProps) {
                 <span className="min-w-0 truncate text-left">
                   {currencyLabel}
                 </span>
-                <HugeiconsIcon
-                  icon={ArrowDown01Icon}
-                  strokeWidth={2}
-                  className="size-4 shrink-0 text-muted-foreground"
+                <Icon
+                  name="IconChevronDownMedium"
+                  size={16}
+                  className="text-muted-foreground"
                 />
               </Button>
             ) : null}
@@ -1533,7 +1465,10 @@ export function BillEditor(props: BillEditorProps) {
         <div className="space-y-2">
           <AutoAnimateContainer className="space-y-2">
             {items.map((item) => (
-              <Card key={item.id} className="rounded-xl border p-3">
+              <Card
+                key={item.id}
+                className="rounded-[22px] border-0 p-3.5"
+              >
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span
@@ -1548,8 +1483,9 @@ export function BillEditor(props: BillEditorProps) {
                         : getItemDisplayEmoji(item)}
                     </span>
                     {editingItemId === item.id && editingField === "name" ? (
-                      <input
+                      <Input
                         autoFocus
+                        variant="compact"
                         value={draftItemName}
                         onChange={(e) => setDraftItemName(e.target.value)}
                         maxLength={TEXT_LIMITS.itemName}
@@ -1579,12 +1515,12 @@ export function BillEditor(props: BillEditorProps) {
                             e.currentTarget.blur();
                           }
                         }}
-                        className="h-7 w-44 rounded-md border bg-background px-2 text-left text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        className="h-7 w-44"
                       />
                     ) : (
                       <button
                         type="button"
-                        className="bg-transparent border-0 p-0 text-left font-medium hover:underline focus-visible:outline-none"
+                        className="border-0 bg-transparent p-0 text-left font-medium tracking-[-0.01em] hover:underline focus-visible:outline-none"
                         onClick={() => {
                           setEditingItemId(item.id);
                           setEditingField("name");
@@ -1598,9 +1534,10 @@ export function BillEditor(props: BillEditorProps) {
 
                   <div className="flex items-center gap-2">
                     {editingItemId === item.id && editingField === "price" ? (
-                      <input
+                      <Input
                         inputMode="decimal"
                         autoFocus
+                        variant="compact"
                         value={draftItemTotalPrice}
                         onChange={(e) => setDraftItemTotalPrice(e.target.value)}
                         onFocus={(e) => e.currentTarget.select()}
@@ -1630,12 +1567,12 @@ export function BillEditor(props: BillEditorProps) {
                             e.currentTarget.blur();
                           }
                         }}
-                        className="h-7 w-28 rounded-md border bg-background px-2 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        className="h-7 w-28 tabular-nums"
                       />
                     ) : (
                       <button
                         type="button"
-                        className="cursor-text bg-transparent border-0 p-0 focus-visible:outline-none"
+                        className="cursor-text border-0 bg-transparent p-0 focus-visible:outline-none"
                         onClick={() => {
                           setEditingItemId(item.id);
                           setEditingField("price");
@@ -1644,7 +1581,7 @@ export function BillEditor(props: BillEditorProps) {
                           );
                         }}
                       >
-                        <Badge>
+                        <Badge className="tabular-nums">
                           {currencyLabel} {formatCents(item.totalPriceCents)}
                         </Badge>
                       </button>
@@ -1673,11 +1610,7 @@ export function BillEditor(props: BillEditorProps) {
                       {deleteConfirmKey === deleteConfirmKeyForItem(item.id) ? (
                         "Delete"
                       ) : (
-                        <HugeiconsIcon
-                          icon={DeleteIcon}
-                          strokeWidth={1.8}
-                          className="size-3.5"
-                        />
+                        <Icon name="IconTrashCanSimple" size={14} />
                       )}
                     </Button>
                   </div>
@@ -1745,7 +1678,7 @@ export function BillEditor(props: BillEditorProps) {
                   >
                     Item name
                   </label>
-                  <input
+                  <Input
                     id="manual-item-name"
                     value={manualItemName}
                     onChange={(e) => {
@@ -1758,7 +1691,7 @@ export function BillEditor(props: BillEditorProps) {
                       submitManualItem();
                     }}
                     placeholder="e.g., Dessert"
-                    className="h-9 rounded-md border bg-background px-3 text-left text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="text-left"
                   />
 
                   <label
@@ -1767,7 +1700,7 @@ export function BillEditor(props: BillEditorProps) {
                   >
                     Total price
                   </label>
-                  <input
+                  <Input
                     id="manual-item-total"
                     inputMode="decimal"
                     value={manualItemTotalPrice}
@@ -1781,7 +1714,7 @@ export function BillEditor(props: BillEditorProps) {
                       submitManualItem();
                     }}
                     placeholder="e.g., 12.50"
-                    className="h-9 rounded-md border bg-background px-3 text-left text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="text-left tabular-nums"
                   />
 
                   <FormErrorAlert message={manualItemError} />
@@ -1816,11 +1749,11 @@ export function BillEditor(props: BillEditorProps) {
           <CardDescription>Service fees, taxes, and discounts</CardDescription>
         </div>
 
-        <Card className="rounded-xl border p-0 overflow-hidden">
-          <CardContent className="divide-y px-4 py-2">
+        <Card className="overflow-hidden rounded-[22px] border-0 p-0">
+          <CardContent className="divide-y divide-white/[0.07] px-4 py-2">
             <div className="flex items-center justify-between py-3">
-              <span className="font-medium">Subtotal</span>
-              <span className="font-semibold">
+              <span className="font-medium tracking-[-0.01em]">Subtotal</span>
+              <span className="font-medium tabular-nums">
                 {currencyLabel} {formatCents(subtotalCents)}
               </span>
             </div>
@@ -1835,7 +1768,7 @@ export function BillEditor(props: BillEditorProps) {
                 items={chargeRowOrder}
                 strategy={verticalListSortingStrategy}
               >
-                <AutoAnimateContainer className="divide-y">
+                <AutoAnimateContainer className="divide-y divide-white/[0.07]">
                   {chargeRowOrder.map((rowId) => {
                     if (rowId === SERVICE_CHARGE_ROW_ID) {
                       // Only show when a service charge is active (OCR or added).
@@ -1855,7 +1788,7 @@ export function BillEditor(props: BillEditorProps) {
 
                             <div className="flex items-start gap-2">
                               <div className="text-right flex flex-col gap-1">
-                                <Badge>
+                                <Badge className="tabular-nums">
                                   {currencyLabel}{" "}
                                   {formatCents(serviceChargeCents)}
                                 </Badge>
@@ -1891,7 +1824,7 @@ export function BillEditor(props: BillEditorProps) {
                                             setEditingRateField(null);
                                           }
                                         }}
-                                        className="h-6 w-16 rounded-md border bg-background px-2 text-right text-xs shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        className="h-6 w-16 rounded-[12px] border border-white/[0.08] bg-white/[0.055] px-2 text-right text-xs tabular-nums outline-none focus-visible:border-white/25 focus-visible:bg-white/[0.08] focus-visible:ring-[3px] focus-visible:ring-ring/40"
                                       />
                                       <span className="ml-1">%</span>
                                     </>
@@ -1938,11 +1871,7 @@ export function BillEditor(props: BillEditorProps) {
                                 DELETE_CONFIRM_SERVICE_CHARGE ? (
                                   "Delete"
                                 ) : (
-                                  <HugeiconsIcon
-                                    icon={DeleteIcon}
-                                    strokeWidth={1.8}
-                                    className="size-3.5"
-                                  />
+                                  <Icon name="IconTrashCanSimple" size={14} />
                                 )}
                               </Button>
                             </div>
@@ -1966,7 +1895,7 @@ export function BillEditor(props: BillEditorProps) {
 
                               <div className="flex items-start gap-3">
                                 <div className="text-right flex flex-col gap-1">
-                                  <Badge>
+                                  <Badge className="tabular-nums">
                                     {currencyLabel} {formatCents(taxCents)}
                                   </Badge>
 
@@ -2000,7 +1929,7 @@ export function BillEditor(props: BillEditorProps) {
                                               setEditingRateField(null);
                                             }
                                           }}
-                                          className="h-6 w-16 rounded-md border bg-background px-2 text-right text-xs shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                          className="h-6 w-16 rounded-[12px] border border-white/[0.08] bg-white/[0.055] px-2 text-right text-xs tabular-nums outline-none focus-visible:border-white/25 focus-visible:bg-white/[0.08] focus-visible:ring-[3px] focus-visible:ring-ring/40"
                                         />
                                         <span className="ml-1">%</span>
                                       </>
@@ -2038,11 +1967,7 @@ export function BillEditor(props: BillEditorProps) {
                                   {deleteConfirmKey === DELETE_CONFIRM_TAX ? (
                                     "Delete"
                                   ) : (
-                                    <HugeiconsIcon
-                                      icon={DeleteIcon}
-                                      strokeWidth={1.8}
-                                      className="size-3.5"
-                                    />
+                                    <Icon name="IconTrashCanSimple" size={14} />
                                   )}
                                 </Button>
                               </div>
@@ -2084,7 +2009,7 @@ export function BillEditor(props: BillEditorProps) {
                                           setEditingRateField(null);
                                         }
                                       }}
-                                      className="h-6 w-16 rounded-md border bg-background px-2 text-right text-xs shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                      className="h-6 w-16 rounded-[12px] border border-white/[0.08] bg-white/[0.055] px-2 text-right text-xs tabular-nums outline-none focus-visible:border-white/25 focus-visible:bg-white/[0.08] focus-visible:ring-[3px] focus-visible:ring-ring/40"
                                     />
                                     <span className="ml-1">%</span>
                                   </>
@@ -2127,7 +2052,9 @@ export function BillEditor(props: BillEditorProps) {
 
                           <div className="flex items-start gap-2">
                             <div className="text-right flex flex-col gap-1">
-                              <Badge>{amountDisplay}</Badge>
+                              <Badge className="tabular-nums">
+                                {amountDisplay}
+                              </Badge>
                             </div>
                             <Button
                               variant={
@@ -2161,11 +2088,7 @@ export function BillEditor(props: BillEditorProps) {
                               deleteConfirmKeyForAdjustment(adjustment.id) ? (
                                 "Delete"
                               ) : (
-                                <HugeiconsIcon
-                                  icon={DeleteIcon}
-                                  strokeWidth={1.8}
-                                  className="size-3.5"
-                                />
+                                <Icon name="IconTrashCanSimple" size={14} />
                               )}
                             </Button>
                           </div>
@@ -2204,7 +2127,7 @@ export function BillEditor(props: BillEditorProps) {
                   >
                     Name
                   </label>
-                  <input
+                  <Input
                     id="adjustment-name"
                     value={adjustmentNameInput}
                     onChange={(e) => {
@@ -2217,7 +2140,6 @@ export function BillEditor(props: BillEditorProps) {
                       submitAdjustment();
                     }}
                     placeholder="e.g., Service charge or Discount"
-                    className="h-9 rounded-md border bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   />
 
                   <label
@@ -2228,34 +2150,44 @@ export function BillEditor(props: BillEditorProps) {
                   </label>
                   <div
                     id="adjustment-amount-type"
-                    className="flex items-center gap-4 rounded-md border bg-background px-3 py-2 text-sm shadow-sm"
+                    className="flex items-center gap-1 rounded-full bg-white/[0.06] p-1"
+                    role="radiogroup"
+                    aria-label="Amount type"
                   >
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="adjustment-amount-type"
-                        value="fixed"
-                        checked={adjustmentAmountType === "fixed"}
-                        onChange={() => {
-                          setAdjustmentAmountType("fixed");
-                          setAdjustmentError(null);
-                        }}
-                      />
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={adjustmentAmountType === "fixed"}
+                      className={cn(
+                        "flex-1 rounded-full px-3 py-2 text-sm font-medium transition-[background-color,color] duration-150",
+                        adjustmentAmountType === "fixed"
+                          ? "bg-white/[0.14] text-foreground"
+                          : "text-[#b4b4b4] hover:text-foreground",
+                      )}
+                      onClick={() => {
+                        setAdjustmentAmountType("fixed");
+                        setAdjustmentError(null);
+                      }}
+                    >
                       Fixed ({currencyLabel})
-                    </label>
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="adjustment-amount-type"
-                        value="percentage"
-                        checked={adjustmentAmountType === "percentage"}
-                        onChange={() => {
-                          setAdjustmentAmountType("percentage");
-                          setAdjustmentError(null);
-                        }}
-                      />
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={adjustmentAmountType === "percentage"}
+                      className={cn(
+                        "flex-1 rounded-full px-3 py-2 text-sm font-medium transition-[background-color,color] duration-150",
+                        adjustmentAmountType === "percentage"
+                          ? "bg-white/[0.14] text-foreground"
+                          : "text-[#b4b4b4] hover:text-foreground",
+                      )}
+                      onClick={() => {
+                        setAdjustmentAmountType("percentage");
+                        setAdjustmentError(null);
+                      }}
+                    >
                       Percentage (%)
-                    </label>
+                    </button>
                   </div>
 
                   <label
@@ -2264,7 +2196,7 @@ export function BillEditor(props: BillEditorProps) {
                   >
                     Value
                   </label>
-                  <input
+                  <Input
                     id="adjustment-value"
                     inputMode="decimal"
                     value={adjustmentValueInput}
@@ -2282,7 +2214,7 @@ export function BillEditor(props: BillEditorProps) {
                         ? "e.g., -10.00"
                         : "e.g., -5"
                     }
-                    className="h-9 rounded-md border bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="tabular-nums"
                   />
 
                   <FormErrorAlert message={adjustmentError} />
@@ -2304,9 +2236,9 @@ export function BillEditor(props: BillEditorProps) {
             </Dialog>
           </CardContent>
 
-          <div className="flex items-center justify-between bg-input/60 px-4 py-4 text-white">
-            <span className="font-semibold">Grand Total</span>
-            <span className="font-semibold">
+          <div className="flex items-center justify-between border-t border-white/[0.07] bg-surface-3 px-4 py-4 text-white">
+            <span className="font-medium tracking-[-0.01em]">Grand Total</span>
+            <span className="font-medium tabular-nums">
               {currencyLabel} {formatCents(grandTotalCents)}
             </span>
           </div>
@@ -2323,13 +2255,13 @@ export function BillEditor(props: BillEditorProps) {
           <CardTitle className="text-xl">Split breakdown</CardTitle>
           <CardDescription>Amount each person owes.</CardDescription>
         </div>
-        <Card className="p-0 gap-0">
+        <Card className="gap-0 overflow-hidden rounded-[22px] border-0 p-0">
           <CardContent className="px-4 py-2">
-            <AutoAnimateContainer className="divide-y">
+            <AutoAnimateContainer className="divide-y divide-white/[0.07]">
               {splitTotals.map(([member, cents]) => (
                 <div
                   key={member}
-                  className="flex items-center justify-between py-2"
+                  className="flex items-center justify-between py-2.5"
                 >
                   <div className="flex items-center gap-2">
                     <MemberAvatar
@@ -2337,16 +2269,18 @@ export function BillEditor(props: BillEditorProps) {
                       avatarBgColors={memberByName.get(member)?.avatarBgColors}
                       photoUrl={resolveMemberPhotoUrl(memberByName.get(member))}
                     />
-                    <span>{member}</span>
+                    <span className="font-medium tracking-[-0.01em]">
+                      {member}
+                    </span>
                   </div>
-                  <Badge variant="outline">
+                  <Badge variant="outline" className="tabular-nums">
                     {currencyLabel} {formatCents(cents)}
                   </Badge>
                 </div>
               ))}
-              <div className="flex items-center justify-between py-2 font-semibold">
-                <span>Total</span>
-                <span>
+              <div className="flex items-center justify-between py-2.5 font-medium">
+                <span className="tracking-[-0.01em]">Total</span>
+                <span className="tabular-nums">
                   {currencyLabel} {formatCents(splitTotalCents)}
                 </span>
               </div>
@@ -2357,7 +2291,7 @@ export function BillEditor(props: BillEditorProps) {
 
       <div
         className={cn(
-          "sticky bottom-0 z-10 -mx-4 border-t bg-background/95 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur supports-backdrop-filter:bg-background/80",
+          "sticky bottom-0 z-10 -mx-4 border-t border-white/[0.07] bg-[#0a0a0a]/85 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-md supports-backdrop-filter:bg-[#0a0a0a]/80",
           showOnlyOcrStatus && "hidden",
         )}
       >
@@ -2392,30 +2326,19 @@ export function BillEditor(props: BillEditorProps) {
       </div>
 
       <Drawer open={membersDrawerOpen} onOpenChange={setMembersDrawerOpen}>
-        <DrawerContent className="bg-background rounded-t-2xl p-0 border-none">
+        <DrawerContent className="rounded-t-[28px] border-none bg-transparent p-0">
           <DrawerHeader>
             <DrawerTitle>Bill members</DrawerTitle>
             <DrawerDescription>
-              Choose who can be assigned to line items. Add someone by name or
-              @username as a placeholder if they haven't tapped Join yet.
-              {groupUnseenCount != null && groupUnseenCount > 0
-                ? ` About ${groupUnseenCount} group member${
-                    groupUnseenCount === 1 ? "" : "s"
-                  } not listed yet — add them by name or @username above.`
-                : null}
-              {groupRosterStatusMessage &&
-              groupMembers.length > 0 &&
-              !(groupUnseenCount != null && groupUnseenCount > 0)
-                ? ` ${groupRosterStatusMessage}`
-                : null}
+              Choose members who share this bill
             </DrawerDescription>
           </DrawerHeader>
           <div className="space-y-3 px-4 pb-2">
-            <div className="flex gap-2">
+            <div className="flex gap-1">
               <label className="sr-only" htmlFor="manual-member-name">
                 Add member by name or @username
               </label>
-              <input
+              <Input
                 id="manual-member-name"
                 value={manualMemberInput}
                 onChange={(e) => {
@@ -2430,19 +2353,20 @@ export function BillEditor(props: BillEditorProps) {
                   }
                 }}
                 placeholder="Add by name or @username…"
-                className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="min-w-0 flex-1 rounded-l-[12px] rounded-r-[6px]"
               />
               <Button
                 type="button"
                 variant="secondary"
                 onClick={addManualMember}
+                className="rounded-l-[6px] rounded-r-[12px]"
               >
                 Add
               </Button>
             </div>
             <FormErrorAlert message={manualMemberError} />
           </div>
-          <div className="max-h-[min(50vh,22rem)] space-y-4 overflow-y-auto px-4 pb-4">
+          <div className="max-h-[80vh] space-y-4 overflow-y-auto px-4 pb-4 pt-2">
             {manualOnlyBillMembers.length > 0 ? (
               <div className="space-y-1">
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -2455,8 +2379,10 @@ export function BillEditor(props: BillEditorProps) {
                     <label
                       key={`manual:${member}`}
                       htmlFor={id}
-                      className={`flex w-full cursor-pointer items-center gap-3 rounded-md border p-2 pl-3 text-sm hover:bg-muted/50 ${
-                        checked ? "border-border" : "border-transparent"
+                      className={`flex w-full cursor-pointer items-center gap-3 rounded-[16px] border p-2.5 pl-3 text-sm transition-colors hover:bg-white/[0.06] ${
+                        checked
+                          ? "border-white/[0.1] bg-white/[0.06]"
+                          : "border-transparent"
                       }`}
                     >
                       <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -2490,7 +2416,7 @@ export function BillEditor(props: BillEditorProps) {
                           });
                         }}
                         aria-label={`Include ${member} in this bill`}
-                        className="shrink-0 size-6 rounded-full"
+                        className="size-6 shrink-0 rounded-full"
                       />
                     </label>
                   );
@@ -2531,9 +2457,9 @@ export function BillEditor(props: BillEditorProps) {
                     <label
                       key={member}
                       htmlFor={id}
-                      className={`flex w-full cursor-pointer items-center gap-3 rounded-md border p-2 pl-3 text-sm hover:bg-muted/50 ${
+                      className={`flex w-full cursor-pointer items-center gap-3 rounded-[16px] border p-2.5 pl-3 text-sm transition-colors hover:bg-white/[0.06] ${
                         checked
-                          ? "border-border bg-input/30"
+                          ? "border-white/[0.1] bg-white/[0.06]"
                           : "border-transparent"
                       }`}
                     >
@@ -2563,7 +2489,7 @@ export function BillEditor(props: BillEditorProps) {
                           });
                         }}
                         aria-label={`Include ${member} in this bill`}
-                        className="shrink-0 size-6 rounded-full"
+                        className="size-6 shrink-0 rounded-full"
                       />
                     </label>
                   );
@@ -2590,7 +2516,7 @@ export function BillEditor(props: BillEditorProps) {
           if (open) setCurrencyFilter("");
         }}
       >
-        <DrawerContent className="bg-background rounded-t-2xl p-0 border-none">
+        <DrawerContent className="rounded-t-[28px] border-none bg-transparent p-0">
           <DrawerHeader>
             <DrawerTitle>Currency</DrawerTitle>
             <DrawerDescription>
@@ -2601,12 +2527,12 @@ export function BillEditor(props: BillEditorProps) {
             <label className="sr-only" htmlFor="currency-filter">
               Filter currencies
             </label>
-            <input
+            <Input
               id="currency-filter"
+              variant="search"
               value={currencyFilter}
               onChange={(e) => setCurrencyFilter(e.target.value)}
               placeholder="Search by code or name…"
-              className="h-10 w-full rounded-md border bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
               autoComplete="off"
             />
           </div>
@@ -2627,19 +2553,18 @@ export function BillEditor(props: BillEditorProps) {
                       setCurrencyDrawerOpen(false);
                     }}
                     className={cn(
-                      "flex w-full items-center justify-between gap-3 rounded-md border p-3 text-left text-sm hover:bg-muted/50",
+                      "flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left text-sm transition-colors hover:bg-white/[0.06]",
                       selected
-                        ? "border-border bg-input/30"
+                        ? "border-white/[0.1] bg-white/[0.06]"
                         : "border-transparent",
                     )}
                   >
                     <span className="min-w-0 flex-1">{o.label}</span>
                     {selected ? (
-                      <HugeiconsIcon
-                        icon={Tick02Icon}
-                        strokeWidth={2}
-                        className="size-5 shrink-0 text-foreground"
-                        aria-hidden
+                      <Icon
+                        name="IconCheckmark1"
+                        size={20}
+                        className="text-foreground"
                       />
                     ) : (
                       <span className="size-5 shrink-0" aria-hidden />

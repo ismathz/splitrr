@@ -24,17 +24,19 @@ function PopoverPositioner({ ...props }: PopoverPrimitive.Positioner.Props) {
 function PopoverContent({
   className,
   sideOffset = 8,
+  align = "center",
   ...props
 }: PopoverPrimitive.Popup.Props & {
   sideOffset?: number;
+  align?: PopoverPrimitive.Positioner.Props["align"];
 }) {
   return (
     <PopoverPortal>
-      <PopoverPositioner sideOffset={sideOffset}>
+      <PopoverPositioner sideOffset={sideOffset} align={align}>
         <PopoverPrimitive.Popup
           data-slot="popover-content"
           className={cn(
-            "z-50 min-w-36 rounded-xl border bg-background p-1 text-foreground shadow-md outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95",
+            "z-50 min-w-36 rounded-[16px] border border-white/[0.08] bg-popover p-1 text-foreground shadow-none ring-1 ring-white/[0.08] outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95",
             className,
           )}
           {...props}

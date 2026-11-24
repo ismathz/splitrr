@@ -66,6 +66,7 @@ export const mockBills: BillDetails[] = import.meta.env.DEV
         billDate: "2026-04-06",
         place: "North Beach Pizza",
         settled: false,
+        members: ["Alice", "Bob", "Carol", "Dave", "Eve"],
         items: mockNewBillItems,
       },
       {
@@ -76,6 +77,7 @@ export const mockBills: BillDetails[] = import.meta.env.DEV
         billDate: "2026-04-01",
         place: "Market Street Deli",
         settled: true,
+        members: ["Alice", "Bob", "Carol"],
         items: [
           {
             id: "item-11",

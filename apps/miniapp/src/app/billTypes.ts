@@ -13,7 +13,6 @@ export function formatBillDateLabel(isoDate: string): string {
   if (!m) return isoDate;
   const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   return d.toLocaleDateString(undefined, {
-    weekday: "short",
     month: "short",
     day: "numeric",
     year: "numeric",

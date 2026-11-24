@@ -1608,6 +1608,105 @@ app.post("/api/bills/:billId/payment-status", async (c) => {
   return c.json({ ok: true, status: nextStatus });
 });
 
+/** Participant names for history cards (session members, else item assignees). */
+function loadMembersByBillIds(billIds: string[]): Map<string, string[]> {
+  const byBill = new Map<string, string[]>();
+  const seenByBill = new Map<string, Set<string>>();
+  if (billIds.length === 0) return byBill;
+
+  const placeholders = billIds.map((_, i) => `?${i + 1}`).join(", ");
+
+  const push = (billId: string, rawName: string | null | undefined) => {
+    const name = rawName?.trim() ?? "";
+    if (!name) return;
+    let seen = seenByBill.get(billId);
+    if (!seen) {
+      seen = new Set();
+      seenByBill.set(billId, seen);
+    }
+    if (seen.has(name)) return;
+    seen.add(name);
+    const list = byBill.get(billId);
+    if (list) list.push(name);
+    else byBill.set(billId, [name]);
+  };
+
+  const sessionRows = db
+    .query(
+      `SELECT bill_session_id, member_name
+       FROM bill_session_members
+       WHERE bill_session_id IN (${placeholders})
+       ORDER BY created_at ASC`
+    )
+    .all(...billIds) as Array<{
+    bill_session_id: string;
+    member_name: string;
+  }>;
+  for (const row of sessionRows) {
+    push(row.bill_session_id, row.member_name);
+  }
+
+  const missingIds = billIds.filter((id) => (byBill.get(id)?.length ?? 0) === 0);
+  if (missingIds.length > 0) {
+    const missingPlaceholders = missingIds
+      .map((_, i) => `?${i + 1}`)
+      .join(", ");
+    const assigneeRows = db
+      .query(
+        `SELECT i.bill_session_id AS bill_session_id,
+                COALESCE(
+                  NULLIF(trim(u.first_name), ''),
+                  NULLIF(trim(u.username), ''),
+                  u.telegram_user_id
+                ) AS display_name,
+                MIN(a.created_at) AS first_assigned_at
+         FROM bill_items i
+         JOIN item_assignments a ON a.bill_item_id = i.id
+         JOIN users u ON u.id = a.user_id
+         WHERE i.bill_session_id IN (${missingPlaceholders})
+         GROUP BY i.bill_session_id, display_name
+         ORDER BY first_assigned_at ASC`
+      )
+      .all(...missingIds) as Array<{
+      bill_session_id: string;
+      display_name: string | null;
+    }>;
+    for (const row of assigneeRows) {
+      push(row.bill_session_id, row.display_name);
+    }
+  }
+
+  return byBill;
+}
+
+function mapHistoryRows(
+  rows: Array<{
+    id: string;
+    title: string;
+    status: string;
+    currency: string;
+    bill_date: string;
+    place: string | null;
+    created_at: string;
+  }>
+) {
+  const membersByBill = loadMembersByBillIds(rows.map((row) => row.id));
+  return rows.map((row) => {
+    const status = normalizeBillSessionStatus(row.status);
+    return {
+      id: row.id,
+      title: row.title,
+      status,
+      currency: row.currency,
+      billDate: row.bill_date,
+      place: row.place,
+      settled: status === "completed",
+      createdAt: row.created_at,
+      members: membersByBill.get(row.id) ?? [],
+    };
+  });
+}
+
 app.get("/api/groups/:groupId/history", (c) => {
   const groupId = c.req.param("groupId");
   // Query param is Telegram user id; column stores internal users.id.
@@ -1642,19 +1741,7 @@ app.get("/api/groups/:groupId/history", (c) => {
     created_at: string;
   }>;
   return c.json({
-    bills: rows.map((row) => {
-      const status = normalizeBillSessionStatus(row.status);
-      return {
-        id: row.id,
-        title: row.title,
-        status,
-        currency: row.currency,
-        billDate: row.bill_date,
-        place: row.place,
-        settled: status === "completed",
-        createdAt: row.created_at,
-      };
-    }),
+    bills: mapHistoryRows(rows),
   });
 });
 
@@ -1699,19 +1786,7 @@ app.get("/api/groups/by-telegram-chat/:telegramChatId/history", (c) => {
   }>;
 
   return c.json({
-    bills: rows.map((row) => {
-      const status = normalizeBillSessionStatus(row.status);
-      return {
-        id: row.id,
-        title: row.title,
-        status,
-        currency: row.currency,
-        billDate: row.bill_date,
-        place: row.place,
-        settled: status === "completed",
-        createdAt: row.created_at,
-      };
-    }),
+    bills: mapHistoryRows(rows),
   });
 });
 

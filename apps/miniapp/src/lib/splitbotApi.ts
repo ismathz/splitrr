@@ -283,6 +283,8 @@ export type ApiBillHistoryEntry = {
   place: string | null;
   settled: boolean;
   createdAt?: string;
+  /** Participants for history avatar stacks. */
+  members?: string[];
 };
 
 export type ApiBillPaymentStatusMember = {

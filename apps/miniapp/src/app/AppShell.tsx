@@ -33,7 +33,7 @@ export function AppShell() {
   }, [launchCtx.startParam, pathname, navigate]);
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-md p-4 space-y-6">
+    <main className="mx-auto min-h-screen w-full max-w-md space-y-6 px-4 py-5 pt-[max(1.25rem,env(safe-area-inset-top))]">
       <Outlet />
     </main>
   );

@@ -13,7 +13,7 @@ function Checkbox({
       data-slot="checkbox"
       className={(state) =>
         cn(
-          "inline-flex size-4 shrink-0 items-center justify-center rounded-sm border border-input bg-background align-middle shadow-xs transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50",
+          "inline-flex size-4 shrink-0 items-center justify-center rounded-sm border border-white/[0.18] bg-white/[0.06] align-middle shadow-none transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50",
           state.checked && "border-primary bg-primary text-primary-foreground",
           typeof className === "function" ? className(state) : className,
         )

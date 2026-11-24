@@ -5,7 +5,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const toggleVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg border px-3 py-1.5 text-sm font-medium transition-all outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-medium transition-[transform,background-color,color,border-color] duration-150 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {
@@ -42,8 +42,8 @@ function Toggle({
       className={cn(
         toggleVariants({ variant }),
         pressed
-          ? "border-border bg-input/60 text-foreground hover:bg-input/80"
-          : "border-transparent bg-transparent hover:bg-input/20 hover:text-foreground",
+          ? "border-white/[0.18] bg-white/[0.14] text-foreground"
+          : "border-transparent bg-white/[0.055] text-[#b4b4b4] hover:bg-white/[0.09] hover:text-foreground",
         className,
       )}
       onClick={(e) => {

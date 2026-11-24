@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import { Badge } from "@/components/ui/badge";
+import { BillRow } from "@/components/BillRow";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import {
@@ -10,56 +10,9 @@ import {
   resolveBillContextForApi,
 } from "@/lib/splitbotApi";
 import { useTelegramLaunchContext } from "@/lib/telegramLaunchContext";
-import {
-  formatBillDateLabel,
-  type BillDetails,
-} from "../billTypes";
+import { type BillDetails } from "../billTypes";
 import { mockBills } from "../billDevMocks";
 import { isDevMockDataEnabled } from "@/lib/devFlags";
-
-const billStatusBadgeClass: Record<BillDetails["status"], string> = {
-  draft: "bg-sky-500/15 text-sky-700",
-  pending: "bg-amber-500/15 text-amber-700",
-  completed: "bg-emerald-500/15 text-emerald-700",
-};
-
-function BillRow({ bill, onView }: { bill: BillDetails; onView: () => void }) {
-  return (
-    <Card
-      className="cursor-pointer rounded-lg border p-3 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      onClick={onView}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onView();
-        }
-      }}
-      role="button"
-      tabIndex={0}
-    >
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="truncate font-medium">{bill.title}</span>
-          <Badge
-            variant="secondary"
-            className={`${billStatusBadgeClass[bill.status]} capitalize`}
-          >
-            {bill.status}
-          </Badge>
-        </div>
-        <div className="mt-1 text-xs text-muted-foreground">
-          <span>{formatBillDateLabel(bill.billDate)}</span>
-          {bill.place ? (
-            <>
-              <span className="mx-1.5 text-border">·</span>
-              <span>{bill.place}</span>
-            </>
-          ) : null}
-        </div>
-      </div>
-    </Card>
-  );
-}
 
 export function BillHistoryScreen() {
   const navigate = useNavigate();
@@ -97,6 +50,7 @@ export function BillHistoryScreen() {
           bills.map((bill) => ({
             ...bill,
             place: bill.place ?? null,
+            members: bill.members ?? [],
             items: [],
           })),
         );
@@ -124,7 +78,7 @@ export function BillHistoryScreen() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div className="space-y-1">
-          <CardTitle>All bills</CardTitle>
+          <CardTitle className="text-xl">All bills</CardTitle>
           <CardDescription>
             {showingDevMocks
               ? "Dev mock history (VITE_SPLITBOT_USE_MOCK_DATA)."
@@ -147,7 +101,7 @@ export function BillHistoryScreen() {
           ))}
         </div>
       ) : (
-        <Card className="rounded-lg border p-4">
+        <Card className="rounded-2xl p-4">
           <CardTitle className="text-base">
             {isLoadingHistory ? "Loading bills..." : "No bills yet"}
           </CardTitle>
