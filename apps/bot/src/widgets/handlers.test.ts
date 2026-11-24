@@ -8,7 +8,7 @@ import {
   buildBalanceChatData,
   serializeAddedChatData,
   serializeBalanceChatData,
-} from "@splitbot/shared";
+} from "@splitbot/shared/widgets";
 import { handleWidgetQuery, markDmStarted } from "./handlers";
 
 function seedDb(): Database {

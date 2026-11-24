@@ -14,7 +14,7 @@ import {
   serializeAddedChatData,
   serializeBalanceChatData,
   sendWidgetOrText,
-} from "@splitbot/shared";
+} from "@splitbot/shared/widgets";
 
 export type WidgetQueryUpdate = {
   id: string;

@@ -3,6 +3,13 @@ export * from "./currency";
 export * from "./allocateCents";
 export * from "./billShares";
 export * from "./sanitizeText";
-export * from "./telegramWebAppAuth";
+/** Browser-safe initData / start_param parsers (no `node:crypto`). */
+export * from "./telegramWebAppInitData";
 export * from "./telegramToken";
-export * from "./widgets";
+/**
+ * Widget HTML/data helpers and HMAC initData validation use Node builtins
+ * (`node:zlib`, `node:crypto`). Import from subpaths instead of this barrel so
+ * the Mini App Vite client never loads them:
+ * - `@splitbot/shared/telegramWebAppAuth`
+ * - `@splitbot/shared/widgets`
+ */

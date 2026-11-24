@@ -139,7 +139,7 @@ VITE_BOT_MINIAPP_API=https://bot.example.com \
 - Prefer one shared env file for both units, e.g. `EnvironmentFile=%h/apps/splitbot/.env` on **both** systemd user services. Avoid a divergent `apps/api/.env` vs root `.env`.
 - Confirm token: `curl -fsS "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe"` should return `"username":"SplitrrBot"`.
 - Reminders: `POST /api/reminders/run` with header `X-Cron-Secret: $REMINDER_CRON_SECRET`.
-- Never set `SPLITBOT_DEV_AUTH_BYPASS=true` or `VITE_SPLITBOT_USE_MOCK_DATA=true` for production builds. Mock bill/member fixtures are DEV-only and require the Vite flag.
+- Never set `SPLITBOT_DEV_AUTH_BYPASS=true` or `VITE_SPLITBOT_USE_MOCK_DATA=true` for production builds. Mock bill/member fixtures and the in-memory Mini App API (OCR upload/scan, etc.) are DEV-only and require the Vite flag.
 
 ## Nightly Backup
 - Schedule cron:

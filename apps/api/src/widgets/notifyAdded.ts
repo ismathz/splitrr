@@ -12,7 +12,7 @@ import {
   formatAddedCaption,
   serializeAddedChatData,
   sendWidgetOrText,
-} from "@splitbot/shared";
+} from "@splitbot/shared/widgets";
 
 type RosterUser = {
   telegram_user_id: string;

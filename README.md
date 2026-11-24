@@ -51,7 +51,7 @@ Telegram Bill Splitter built with Bun + TypeScript.
 ### Security Controls
 - Telegram webhook path includes a secret token (optional matching `X-Telegram-Bot-Api-Secret-Token` header).
 - Mini App → API auth: `X-Telegram-Init-Data` verified with Telegram HMAC + `auth_date` freshness (`SPLITBOT_DEV_AUTH_BYPASS` for local only; forbidden in production).
-- Mini App mock bills/members: local only via `VITE_SPLITBOT_USE_MOCK_DATA=true` under Vite DEV (never in production builds).
+- Mini App mock bills/members + in-memory API (OCR upload/scan, save, history, roster, payment, announce): local only via `VITE_SPLITBOT_USE_MOCK_DATA=true` under Vite DEV (never in production builds). Optional latency: `VITE_SPLITBOT_MOCK_UPLOAD_MS` / `VITE_SPLITBOT_MOCK_OCR_MS`.
 - Receipt objects are private and served through short-lived signed URLs; OCR uses owned storage keys only (no arbitrary `imageUrl`).
 - Upload MIME/size validation and in-memory rate limits on receipt upload + OCR.
 - Reminder cron protected by `REMINDER_CRON_SECRET`.

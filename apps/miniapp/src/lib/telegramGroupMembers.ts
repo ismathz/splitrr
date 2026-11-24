@@ -424,10 +424,16 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
     const billCtx = resolveBillContextForApi(launch);
     const botBase = import.meta.env.VITE_BOT_MINIAPP_API;
     const hasInitData = Boolean(launch.initData?.trim());
+    const useMocks = isDevMockDataEnabled();
     const canFetchRoster =
-      Boolean(apiBase) && Boolean(billCtx?.telegramChatId) && hasInitData;
+      Boolean(apiBase) &&
+      Boolean(billCtx?.telegramChatId) &&
+      (hasInitData || useMocks);
     const canFetchBot =
-      typeof botBase === "string" && botBase.trim().length > 0 && hasInitData;
+      typeof botBase === "string" &&
+      botBase.trim().length > 0 &&
+      hasInitData &&
+      !useMocks;
 
     if (!canFetchRoster && !canFetchBot) {
       const sync = withCurrentUser(resolveTelegramGroupMembersSync(), launch);

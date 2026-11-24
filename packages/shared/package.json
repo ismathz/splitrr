@@ -2,5 +2,10 @@
   "name": "@splitbot/shared",
   "version": "0.1.0",
   "type": "module",
-  "main": "src/index.ts"
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./telegramWebAppAuth": "./src/telegramWebAppAuth.ts",
+    "./widgets": "./src/widgets/index.ts"
+  }
 }

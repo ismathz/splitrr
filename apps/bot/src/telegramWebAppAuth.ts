@@ -2,5 +2,5 @@
 export {
   parseTelegramChatIdFromInitData,
   parseTelegramUserFromInitData,
-  validateWebAppInitData
 } from "@splitbot/shared";
+export { validateWebAppInitData } from "@splitbot/shared/telegramWebAppAuth";

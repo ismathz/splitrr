@@ -7,6 +7,21 @@ import {
 import type { TelegramLaunchContext } from "@/lib/telegramLaunchContext";
 import { resolveLaunchTelegramChatId } from "@/lib/telegramLaunchContext";
 import { parseTelegramChatIdFromStartParam } from "@/lib/telegramGroupMembers";
+import { isDevMockDataEnabled } from "@/lib/devFlags";
+import {
+  mockAnnounceBillToGroup,
+  mockComputeBillSettlements,
+  mockCreateBillSession,
+  mockDeleteBill,
+  mockGetBillDetails,
+  mockGetBillPaymentStatus,
+  mockGetGroupHistoryByTelegramChatId,
+  mockGetGroupRosterByTelegramChatId,
+  mockRunReceiptOcr,
+  mockUpdateBillDetails,
+  mockUpdateBillPaymentStatus,
+  mockUploadReceipt,
+} from "@/lib/splitbotApiMock";
 
 /** Base URL for `apps/api` (bills + OCR). Set `VITE_SPLITBOT_API`; DEV defaults to localhost:3000. */
 export function getSplitbotApiBase(): string {
@@ -150,6 +165,9 @@ export async function createBillSession(
     currency?: string;
   },
 ): Promise<{ billId: string; groupId: number }> {
+  if (isDevMockDataEnabled()) {
+    return mockCreateBillSession(body);
+  }
   const res = await apiFetch(`${base}/api/bills`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -167,6 +185,10 @@ export async function uploadReceipt(
   billId: string,
   file: File,
 ): Promise<{ key: string; signedUrl: string }> {
+  if (isDevMockDataEnabled()) {
+    void file;
+    return mockUploadReceipt(billId);
+  }
   const initData = getTelegramInitData();
   if (!initData) {
     throw new Error(
@@ -201,6 +223,10 @@ export async function runReceiptOcr(
   billId: string,
   storageKey?: string,
 ): Promise<ParsedReceipt> {
+  if (isDevMockDataEnabled()) {
+    void storageKey;
+    return mockRunReceiptOcr(billId);
+  }
   const res = await apiFetch(`${base}/api/bills/${billId}/ocr`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -300,6 +326,12 @@ export async function getGroupRosterByTelegramChatId(
   telegramChatId: string,
   options?: { refresh?: boolean },
 ): Promise<ApiGroupRoster> {
+  if (isDevMockDataEnabled()) {
+    void base;
+    void telegramChatId;
+    void options;
+    return mockGetGroupRosterByTelegramChatId();
+  }
   const qs = options?.refresh ? "?refresh=1" : "";
   const url = `${base}/api/groups/by-telegram-chat/${encodeURIComponent(telegramChatId)}/roster${qs}`;
   const res = await apiFetch(url);
@@ -315,6 +347,12 @@ export async function getGroupHistoryByTelegramChatId(
   telegramChatId: string,
   createdByUserId?: number,
 ): Promise<{ bills: ApiBillHistoryEntry[] }> {
+  if (isDevMockDataEnabled()) {
+    void base;
+    void telegramChatId;
+    void createdByUserId;
+    return mockGetGroupHistoryByTelegramChatId();
+  }
   const qs = new URLSearchParams();
   if (typeof createdByUserId === "number") {
     qs.set("createdByUserId", String(createdByUserId));
@@ -336,6 +374,10 @@ export async function getBillDetails(
   base: string,
   billId: string,
 ): Promise<ApiBillDetails> {
+  if (isDevMockDataEnabled()) {
+    void base;
+    return mockGetBillDetails(billId);
+  }
   const res = await apiFetch(`${base}/api/bills/${billId}`);
   if (!res.ok) {
     const t = await res.text();
@@ -367,6 +409,10 @@ export async function updateBillDetails(
     }>;
   },
 ): Promise<{ ok: true }> {
+  if (isDevMockDataEnabled()) {
+    void base;
+    return mockUpdateBillDetails(billId, body);
+  }
   const res = await apiFetch(`${base}/api/bills/${billId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -380,6 +426,10 @@ export async function updateBillDetails(
 }
 
 export async function deleteBill(base: string, billId: string): Promise<{ ok: true }> {
+  if (isDevMockDataEnabled()) {
+    void base;
+    return mockDeleteBill(billId);
+  }
   const res = await apiFetch(`${base}/api/bills/${billId}`, {
     method: "DELETE",
   });
@@ -394,6 +444,10 @@ export async function getBillPaymentStatus(
   base: string,
   billId: string,
 ): Promise<{ members: ApiBillPaymentStatusMember[] }> {
+  if (isDevMockDataEnabled()) {
+    void base;
+    return mockGetBillPaymentStatus(billId);
+  }
   const res = await apiFetch(`${base}/api/bills/${billId}/payment-status`);
   if (!res.ok) {
     const t = await res.text();
@@ -407,6 +461,10 @@ export async function updateBillPaymentStatus(
   billId: string,
   body: { name: string; paid: boolean },
 ): Promise<{ ok: true; status?: "draft" | "pending" | "completed" }> {
+  if (isDevMockDataEnabled()) {
+    void base;
+    return mockUpdateBillPaymentStatus(billId, body);
+  }
   const res = await apiFetch(`${base}/api/bills/${billId}/payment-status`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -427,6 +485,12 @@ export async function computeBillSettlements(
   billId: string,
   paidByUserId?: number,
 ): Promise<{ ok: true; transfers: number }> {
+  if (isDevMockDataEnabled()) {
+    void base;
+    void billId;
+    void paidByUserId;
+    return mockComputeBillSettlements();
+  }
   const res = await apiFetch(`${base}/api/bills/${billId}/settlements/compute`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -446,6 +510,10 @@ export async function announceBillToGroup(
   base: string,
   billId: string,
 ): Promise<{ ok: true; openUrl?: string | null }> {
+  if (isDevMockDataEnabled()) {
+    void base;
+    return mockAnnounceBillToGroup(billId);
+  }
   const res = await apiFetch(`${base}/api/bills/${billId}/announce`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

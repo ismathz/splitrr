@@ -6,4 +6,4 @@ export {
   sendWidgetOrText,
   type SendWidgetParams,
   type SendWidgetResult,
-} from "@splitbot/shared";
+} from "@splitbot/shared/widgets";

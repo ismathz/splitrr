@@ -1,8 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { createHmac } from "node:crypto";
-import {
-  validateWebAppInitDataDetailed
-} from "@splitbot/shared";
+import { validateWebAppInitDataDetailed } from "@splitbot/shared/telegramWebAppAuth";
 import {
   readInitDataFromHeaders,
   readInitDataFromQuery

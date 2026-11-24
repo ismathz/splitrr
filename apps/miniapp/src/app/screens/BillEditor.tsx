@@ -76,6 +76,7 @@ import {
   isGroupLikeLaunch,
   useTelegramLaunchContext,
 } from "@/lib/telegramLaunchContext";
+import { isDevMockDataEnabled } from "@/lib/devFlags";
 import {
   createBillSession,
   getSplitbotApiBase,
@@ -484,7 +485,8 @@ export function BillEditor(props: BillEditorProps) {
       setOcrPhase("skipped");
       return;
     }
-    if (!splitbotApiBase) {
+    const useMocks = isDevMockDataEnabled();
+    if (!splitbotApiBase && !useMocks) {
       setOcrPhase("error");
       setOcrError(
         "Configure VITE_SPLITBOT_API (Splitrr API URL) to scan receipts from the web app.",
@@ -499,7 +501,8 @@ export function BillEditor(props: BillEditorProps) {
       return;
     }
     // Wait for Telegram.WebApp.initData — uploading without it yields missing/invalid_init_data.
-    if (!launchCtx.initData?.trim()) {
+    // Local mock mode skips Telegram auth entirely.
+    if (!useMocks && !launchCtx.initData?.trim()) {
       setOcrPhase("uploading");
       setOcrError(null);
       const waitId = window.setTimeout(() => {
@@ -517,10 +520,11 @@ export function BillEditor(props: BillEditorProps) {
 
     const day = new Date().toISOString().slice(0, 10);
     const title = `Receipt ${day}`;
+    const apiBase = splitbotApiBase || "http://localhost:3000";
 
     (async () => {
       try {
-        const { billId } = await createBillSession(splitbotApiBase, {
+        const { billId } = await createBillSession(apiBase, {
           telegramChatId: billApiContext.telegramChatId,
           groupTitle: billApiContext.groupTitle,
           title,
@@ -530,13 +534,13 @@ export function BillEditor(props: BillEditorProps) {
         });
         setServerBillId(billId);
         const { key: storageKey } = await uploadReceipt(
-          splitbotApiBase,
+          apiBase,
           billId,
           receiptFile,
         );
         if (cancelled) return;
         setOcrPhase("scanning");
-        const parsed = await runReceiptOcr(splitbotApiBase, billId, storageKey);
+        const parsed = await runReceiptOcr(apiBase, billId, storageKey);
         if (cancelled) return;
         setCurrencyCode(normalizeCurrencyCode(parsed.currency));
         const merchant = sanitizeUserText(

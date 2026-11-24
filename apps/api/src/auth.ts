@@ -2,9 +2,9 @@ import type { Context, Next } from "hono";
 import {
   parseTelegramUserFromInitData,
   telegramTokenFingerprint,
-  validateWebAppInitDataDetailed,
-  type TelegramWebAppUser
+  type TelegramWebAppUser,
 } from "@splitbot/shared";
+import { validateWebAppInitDataDetailed } from "@splitbot/shared/telegramWebAppAuth";
 import { env } from "./env";
 import {
   collectInitDataCandidates,
