@@ -47,6 +47,8 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import AutoAnimateContainer from "@/components/AutoAnimateContainer";
 import { FormErrorAlert } from "@/components/FormErrorAlert";
+import { ReceiptScanPreview } from "@/components/ReceiptScanPreview";
+import { ReceiptScanTransition } from "@/components/ReceiptScanTransition";
 import { Input } from "@/components/ui/input";
 import { Toggle } from "@/components/ui/toggle";
 import {
@@ -384,10 +386,19 @@ export function BillEditor(props: BillEditorProps) {
     | "ok"
     | "error"
     | "skipped";
-  const [ocrPhase, setOcrPhase] = useState<OcrPhase>(() =>
-    isEditMode ? "skipped" : "idle",
-  );
+  const [ocrPhase, setOcrPhase] = useState<OcrPhase>(() => {
+    if (isEditMode) return "skipped";
+    if (isFromReceiptScan && receiptFile) return "uploading";
+    return "idle";
+  });
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [scanWaveDone, setScanWaveDone] = useState(false);
+  const handleScanWaveComplete = useCallback(() => {
+    setScanWaveDone(true);
+  }, []);
+  useEffect(() => {
+    setScanWaveDone(false);
+  }, [receiptFile]);
   const isOcrProcessing =
     ocrPhase === "loading" || ocrPhase === "uploading" || ocrPhase === "scanning";
   const showOnlyOcrStatus =
@@ -1306,8 +1317,13 @@ export function BillEditor(props: BillEditorProps) {
     </CardDescription>
   );
 
-  return (
-    <div className="space-y-6">
+  const useScanWave =
+    isFromReceiptScan &&
+    Boolean(receiptFile) &&
+    !scanWaveDone &&
+    ocrPhase !== "error";
+
+  const topBar = (
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           {props.onBack ? (
@@ -1331,30 +1347,44 @@ export function BillEditor(props: BillEditorProps) {
           ) : null}
         </div>
       </div>
+  );
 
+  const scanStatusSection = (
+    <>
       {showOnlyOcrStatus ? (
-        <div className="rounded-[22px] border border-primary/25 bg-primary/10 p-4">
-          {isOcrProcessing ? (
-            <div className="flex items-center gap-3">
-              <div className="flex items-end gap-1" aria-hidden>
-                <span className="size-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]"></span>
-                <span className="size-1.5 rounded-full bg-primary animate-bounce [animation-delay:120ms]"></span>
-                <span className="size-1.5 rounded-full bg-primary animate-bounce [animation-delay:240ms]"></span>
-              </div>
-              <p className="text-sm text-foreground">
-                {ocrPhase === "uploading"
+        <div className="space-y-3">
+          {isOcrProcessing && receiptFile ? (
+            <ReceiptScanPreview
+              file={receiptFile}
+              active={isOcrProcessing}
+              statusText={
+                ocrPhase === "uploading"
                   ? "Uploading receipt…"
-                  : "Scanning receipt…"}
-              </p>
-            </div>
+                  : "Scanning receipt…"
+              }
+            />
           ) : null}
-          {isOcrProcessing ? (
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-primary/20">
-              <div className="h-full w-1/2 animate-pulse rounded-full bg-primary/70"></div>
+          {isOcrProcessing && !receiptFile ? (
+            <div className="rounded-[22px] border border-primary/25 bg-primary/10 p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex items-end gap-1" aria-hidden>
+                  <span className="size-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]"></span>
+                  <span className="size-1.5 rounded-full bg-primary animate-bounce [animation-delay:120ms]"></span>
+                  <span className="size-1.5 rounded-full bg-primary animate-bounce [animation-delay:240ms]"></span>
+                </div>
+                <p className="text-sm text-foreground">
+                  {ocrPhase === "uploading"
+                    ? "Uploading receipt…"
+                    : "Scanning receipt…"}
+                </p>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-primary/20">
+                <div className="h-full w-1/2 animate-pulse rounded-full bg-primary/70"></div>
+              </div>
             </div>
           ) : null}
           {ocrPhase === "error" ? (
-            <div className="space-y-2">
+            <div className="space-y-2 rounded-[22px] border border-primary/25 bg-primary/10 p-4">
               <p className="text-sm font-medium tracking-[-0.01em] text-foreground">
                 Couldn&apos;t scan the receipt
               </p>
@@ -1363,7 +1393,11 @@ export function BillEditor(props: BillEditorProps) {
           ) : null}
         </div>
       ) : null}
+    </>
+  );
 
+  const mainEditor = (
+    <>
       <div className={cn("space-y-4", showOnlyOcrStatus && "hidden")}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 space-y-1">
@@ -1371,25 +1405,6 @@ export function BillEditor(props: BillEditorProps) {
             {headerDescriptionNode}
             {isFromReceiptScan ? (
               <div className="space-y-1 pt-1">
-                {isOcrProcessing ? (
-                  <div className="rounded-2xl border border-primary/25 bg-primary/10 p-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-end gap-1" aria-hidden>
-                        <span className="size-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]"></span>
-                        <span className="size-1.5 rounded-full bg-primary animate-bounce [animation-delay:120ms]"></span>
-                        <span className="size-1.5 rounded-full bg-primary animate-bounce [animation-delay:240ms]"></span>
-                      </div>
-                      <p className="text-sm text-foreground">
-                        {ocrPhase === "uploading"
-                          ? "Uploading receipt…"
-                          : "Scanning receipt…"}
-                      </p>
-                    </div>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-primary/20">
-                      <div className="h-full w-1/2 animate-pulse rounded-full bg-primary/70"></div>
-                    </div>
-                  </div>
-                ) : null}
                 {ocrPhase === "error" && ocrError ? (
                   <FormErrorAlert message={ocrError} />
                 ) : null}
@@ -2324,7 +2339,11 @@ export function BillEditor(props: BillEditorProps) {
           ) : null}
         </div>
       </div>
+    </>
+  );
 
+  const billDrawers = (
+    <>
       <Drawer open={membersDrawerOpen} onOpenChange={setMembersDrawerOpen}>
         <DrawerContent className="rounded-t-[28px] border-none bg-transparent p-0">
           <DrawerHeader>
@@ -2585,6 +2604,49 @@ export function BillEditor(props: BillEditorProps) {
           </DrawerFooter>
         </DrawerContent>
       </Drawer>
+    </>
+  );
+
+  if (useScanWave) {
+    return (
+      <>
+        <ReceiptScanTransition
+          readyToReveal={ocrPhase === "ok"}
+          onComplete={handleScanWaveComplete}
+          scanContent={
+            <div className="space-y-6">
+              {topBar}
+              {receiptFile ? (
+                <ReceiptScanPreview
+                  file={receiptFile}
+                  active={isOcrProcessing}
+                  statusText={
+                    ocrPhase === "uploading"
+                      ? "Uploading receipt…"
+                      : "Scanning receipt…"
+                  }
+                />
+              ) : null}
+            </div>
+          }
+          revealedContent={
+            <div className="space-y-6">
+              {topBar}
+              {mainEditor}
+            </div>
+          }
+        />
+        {billDrawers}
+      </>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {topBar}
+      {scanStatusSection}
+      {mainEditor}
+      {billDrawers}
     </div>
   );
 }
