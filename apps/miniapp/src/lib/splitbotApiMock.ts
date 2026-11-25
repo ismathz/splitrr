@@ -116,7 +116,13 @@ function seedIfNeeded(): void {
         totalPriceCents: item.totalPriceCents,
         assignees: item.assignees ?? [],
       })),
-      charges: bill.charges ?? [],
+      charges: (bill.charges ?? []).map((c, i) => ({
+        id: c.id ?? `${bill.id}-charge-${i}`,
+        chargeType: c.chargeType,
+        amountCents: c.amountCents,
+        label: c.label ?? null,
+        ratePct: c.ratePct ?? null,
+      })),
       createdAt: `${bill.billDate}T12:00:00.000Z`,
     });
     if (bill.settled) {
