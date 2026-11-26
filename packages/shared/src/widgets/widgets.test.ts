@@ -18,7 +18,12 @@ import {
   type AddedChatData,
   type BalanceChatData,
 } from "./types";
-import { formatAddedCaption, formatBalanceCaption } from "./captions";
+import {
+  buildAddedBillOpenUrl,
+  buildAddedOpenReplyMarkup,
+  formatAddedCaption,
+  formatBalanceCaption,
+} from "./captions";
 import { sendWidget, sendWidgetOrText } from "./telegramApi";
 
 describe("widget HTML size budget", () => {
@@ -113,7 +118,14 @@ describe("chat_data budget", () => {
     };
     const addedJson = compactJsonUnderBudget(added);
     assertWidgetDataBudget(addedJson);
-    expect(formatAddedCaption(added)).toContain("You've been added");
+    const caption = formatAddedCaption(added);
+    const openUrl = buildAddedBillOpenUrl(added);
+    expect(caption).toContain("You've been added");
+    expect(openUrl).toMatch(/^https:\/\/t\.me\/SplitrrBot\/app\?startapp=/);
+    expect(caption).toContain(`Open: ${openUrl}`);
+    expect(buildAddedOpenReplyMarkup(added)).toEqual({
+      inline_keyboard: [[{ text: "Open bill", url: openUrl }]],
+    });
   });
 });
 
@@ -187,6 +199,49 @@ describe("sendWidget caption omission", () => {
     expect(widgetCall?.body).not.toHaveProperty("caption");
     const textCall = calls.find((c) => c.method === "sendMessage");
     expect(String(textCall?.body.text ?? "")).toBe(fallback);
+  });
+
+  it("attaches the Open bill link on the widget and the text fallback", async () => {
+    const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const method = String(input).split("/").pop() ?? "unknown";
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : {};
+      calls.push({ method, body });
+      if (method === "sendWidget") {
+        return new Response(
+          JSON.stringify({ ok: false, description: "widgets_unavailable" }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ ok: true, result: { message_id: 13 } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const markup = {
+      inline_keyboard: [
+        [{ text: "Open bill", url: "https://t.me/SplitrrBot/app?startapp=abc" }],
+      ],
+    };
+    await sendWidgetOrText("123:ABC", {
+      chatId: 9,
+      html: ADDED_WIDGET_HTML,
+      textFallback: "Splitrr · You've been added\nOpen: https://t.me/SplitrrBot/app?startapp=abc",
+      replyMarkup: markup,
+    });
+    const widgetCall = calls.find((c) => c.method === "sendWidget");
+    const textCall = calls.find((c) => c.method === "sendMessage");
+    expect(widgetCall?.body.reply_markup).toEqual(markup);
+    expect(textCall?.body.reply_markup).toEqual(markup);
+    expect(String(textCall?.body.text ?? "")).toContain(
+      "https://t.me/SplitrrBot/app?startapp=abc",
+    );
   });
 });
 

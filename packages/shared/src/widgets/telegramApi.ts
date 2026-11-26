@@ -12,6 +12,10 @@ export type SendWidgetParams = {
   allowQueries?: boolean;
   width?: number;
   height?: number;
+  /** Inline keyboard, same shape as the group "Open bill" share button. */
+  replyMarkup?: {
+    inline_keyboard: Array<Array<{ text: string; url: string }>>;
+  };
 };
 
 export type SendWidgetResult =
@@ -62,6 +66,7 @@ export async function sendWidget(
   if (params.publicData != null) body.public_data = params.publicData;
   if (params.width != null) body.width = params.width;
   if (params.height != null) body.height = params.height;
+  if (params.replyMarkup) body.reply_markup = params.replyMarkup;
 
   const res = await telegramApi(botToken, "sendWidget", body);
   if (!res.ok) {
@@ -128,11 +133,13 @@ export async function sendWidgetOrText(
     return { mode: "widget", messageId: widget.messageId };
   }
   console.warn("[widgets] sendWidget failed, falling back to text", widget.error);
-  const textRes = await telegramApi(botToken, "sendMessage", {
+  const textBody: Record<string, unknown> = {
     chat_id: params.chatId,
     text: params.textFallback.slice(0, 4096),
     disable_web_page_preview: true,
-  });
+  };
+  if (params.replyMarkup) textBody.reply_markup = params.replyMarkup;
+  const textRes = await telegramApi(botToken, "sendMessage", textBody);
   if (!textRes.ok) {
     return {
       mode: "text",

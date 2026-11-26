@@ -75,6 +75,14 @@ describe("notifyNewlyAddedMembers", () => {
       .map((c) => c.body.chat_id)
       .sort();
     expect(widgetChats).toEqual([222, 333]);
+    const markup = calls.find((c) => c.method === "sendWidget")?.body
+      .reply_markup as {
+      inline_keyboard: Array<Array<{ text: string; url: string }>>;
+    };
+    expect(markup.inline_keyboard[0]?.[0]?.text).toBe("Open bill");
+    expect(markup.inline_keyboard[0]?.[0]?.url).toContain(
+      "https://t.me/SplitrrBot/app?startapp=",
+    );
     const cara = db
       .query(`SELECT dm_started_at FROM users WHERE telegram_user_id = '333'`)
       .get() as { dm_started_at: string | null };
@@ -186,5 +194,13 @@ describe("notifyNewlyAddedMembers", () => {
     expect(text).toBeTruthy();
     expect(String(text?.body.text ?? "")).toContain("Splitrr");
     expect(String(text?.body.text ?? "")).toContain("You've been added");
+    expect(String(text?.body.text ?? "")).toContain(
+      "https://t.me/SplitrrBot/app?startapp=",
+    );
+    const markup = text?.body.reply_markup as {
+      inline_keyboard: Array<Array<{ text: string; url: string }>>;
+    };
+    expect(markup.inline_keyboard[0]?.[0]?.text).toBe("Open bill");
+    expect(markup.inline_keyboard[0]?.[0]?.url).toContain("startapp=");
   });
 });

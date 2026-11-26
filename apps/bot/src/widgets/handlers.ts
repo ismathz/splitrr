@@ -6,6 +6,7 @@ import {
   BALANCE_WIDGET_HTML,
   answerWidgetQuery,
   buildAddedChatData,
+  buildAddedOpenReplyMarkup,
   buildBalanceChatData,
   editMessageWidgetData,
   formatAddedCaption,
@@ -101,6 +102,7 @@ export async function sendAddedWidget(input: {
     textFallback: formatAddedCaption(data),
     chatData,
     allowQueries: true,
+    replyMarkup: buildAddedOpenReplyMarkup(data),
   });
 }
 

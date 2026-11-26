@@ -9,6 +9,7 @@ import {
 import {
   ADDED_WIDGET_HTML,
   buildAddedChatData,
+  buildAddedOpenReplyMarkup,
   formatAddedCaption,
   serializeAddedChatData,
   sendWidgetOrText,
@@ -241,6 +242,7 @@ export async function notifyNewlyAddedMembers(input: {
         textFallback: formatAddedCaption(data),
         chatData: serializeAddedChatData(data),
         allowQueries: true,
+        replyMarkup: buildAddedOpenReplyMarkup(data),
       });
       if (result.messageId != null) {
         sent += 1;

@@ -1,4 +1,32 @@
+import { buildDirectMiniAppLink } from "../telegramWebAppInitData";
 import type { AddedChatData, BalanceChatData } from "./types";
+
+/** Same Mini App bill link used when a bill is shared to the group. */
+export function buildAddedBillOpenUrl(
+  data: Pick<AddedChatData, "bot" | "app" | "cid" | "bid">,
+): string | null {
+  if (!data.bot.trim() || !data.app.trim() || !data.cid.trim() || !data.bid.trim()) {
+    return null;
+  }
+  return buildDirectMiniAppLink({
+    botUsername: data.bot,
+    shortName: data.app,
+    payload: { cid: data.cid, bid: data.bid },
+  });
+}
+
+/** Inline "Open bill" button for the added-to-bill DM. */
+export function buildAddedOpenReplyMarkup(
+  data: Pick<AddedChatData, "bot" | "app" | "cid" | "bid">,
+):
+  | { inline_keyboard: Array<Array<{ text: string; url: string }>> }
+  | undefined {
+  const openUrl = buildAddedBillOpenUrl(data);
+  if (!openUrl) return undefined;
+  return {
+    inline_keyboard: [[{ text: "Open bill", url: openUrl }]],
+  };
+}
 
 function money(currency: string, cents: number): string {
   return `${currency} ${(cents / 100).toFixed(2)}`;
@@ -42,6 +70,10 @@ export function formatAddedCaption(data: AddedChatData): string {
   }
   if (data.pay) {
     lines.push(`Payment: ${data.pay}`);
+  }
+  const openUrl = buildAddedBillOpenUrl(data);
+  if (openUrl) {
+    lines.push(`Open: ${openUrl}`);
   }
   return lines.join("\n");
 }
