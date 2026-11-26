@@ -48,6 +48,7 @@ import {
   resolveBillContextForApi,
   updateBillDetails,
   updateBillPaymentStatus,
+  updateMyPaymentDetails,
 } from "@/lib/splitbotApi";
 import {
   useTelegramGroupMembers,
@@ -56,6 +57,7 @@ import {
 import { useTelegramLaunchContext } from "@/lib/telegramLaunchContext";
 import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
 import { MemberAvatar } from "@/components/MemberAvatar";
+import { sanitizeUserText, TEXT_LIMITS } from "@splitbot/shared";
 
 function uniqueMembersInOrder(items: Item[]): string[] {
   const seen = new Set<string>();
@@ -82,6 +84,27 @@ function balancesCentsByMember(
 
 function formatBillMoney(currencyCode: string, cents: number) {
   return `${currencyCode} ${(cents / 100).toFixed(2)}`;
+}
+
+function mapApiBillToDetails(
+  fetched: Awaited<ReturnType<typeof getBillDetails>>,
+): BillDetails {
+  const items = fetched.items.map((item) => ({
+    ...item,
+    assignees: item.assignees ?? [],
+  }));
+  const membersFromApi = (fetched.members ?? [])
+    .map((m) => m.trim())
+    .filter(Boolean);
+  const members =
+    membersFromApi.length > 0 ? membersFromApi : uniqueMembersInOrder(items);
+  return {
+    ...fetched,
+    members,
+    memberProfiles: fetched.memberProfiles ?? [],
+    items,
+    charges: fetched.charges ?? [],
+  };
 }
 
 function AssigneesRow({
@@ -226,24 +249,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
       try {
         const fetched = await getBillDetails(splitbotApiBase, billId);
         if (cancelled) return;
-        const items = fetched.items.map((item) => ({
-          ...item,
-          assignees: item.assignees ?? [],
-        }));
-        const membersFromApi = (fetched.members ?? [])
-          .map((m) => m.trim())
-          .filter(Boolean);
-        const members =
-          membersFromApi.length > 0
-            ? membersFromApi
-            : uniqueMembersInOrder(items);
-        setServerBill({
-          ...fetched,
-          members,
-          memberProfiles: fetched.memberProfiles ?? [],
-          items,
-          charges: fetched.charges ?? [],
-        });
+        setServerBill(mapApiBillToDetails(fetched));
       } catch (e) {
         if (cancelled) return;
         if (!mockBill) {
@@ -260,6 +266,17 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
       cancelled = true;
     };
   }, [billId, splitbotApiBase, mockBill, reloadToken]);
+
+  const currentUserDisplayName = useMemo(() => {
+    const u = launchCtx.currentUser;
+    if (!u) return null;
+    const first = u.first_name?.trim() ?? "";
+    const last = u.last_name?.trim() ?? "";
+    const full = `${first} ${last}`.trim();
+    if (full) return full;
+    if (u.username?.trim()) return u.username.trim();
+    return String(u.id);
+  }, [launchCtx.currentUser]);
 
   const membersOrdered = useMemo(() => {
     if (!bill) return [];
@@ -324,6 +341,23 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
   const [announceToastMessage, setAnnounceToastMessage] = useState<
     string | null
   >(null);
+  const [copiedPaymentDetails, setCopiedPaymentDetails] = useState(false);
+  const [isEditingPaymentDetails, setIsEditingPaymentDetails] = useState(false);
+  const [draftPaymentDetails, setDraftPaymentDetails] = useState("");
+  const [isSavingPaymentDetails, setIsSavingPaymentDetails] = useState(false);
+  const [paymentDetailsError, setPaymentDetailsError] = useState<string | null>(
+    null,
+  );
+  const [isSavingPaidBy, setIsSavingPaidBy] = useState(false);
+  const [isPaidByDialogOpen, setIsPaidByDialogOpen] = useState(false);
+
+  useEffect(() => {
+    setCopiedPaymentDetails(false);
+    setIsEditingPaymentDetails(false);
+    setDraftPaymentDetails("");
+    setPaymentDetailsError(null);
+    setIsPaidByDialogOpen(false);
+  }, [billId]);
 
   const syncBillStatusFromPaid = (nextPaid: Set<string>) => {
     const allPaid =
@@ -338,6 +372,68 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
           }
         : billPrev,
     );
+  };
+
+  const selectPaidBy = async (name: string) => {
+    if (!bill || !splitbotApiBase) return;
+    const current = (bill.paidByName ?? "").trim().toLowerCase();
+    if (name.toLowerCase() === current) {
+      setIsPaidByDialogOpen(false);
+      return;
+    }
+
+    setIsSavingPaidBy(true);
+    setPaymentDetailsError(null);
+    const previousPaidByName = bill.paidByName;
+    const previousIsPayer = bill.isCurrentUserPayer;
+    const previousPaymentDetails = bill.paymentDetails;
+    const isSelf =
+      currentUserDisplayName != null &&
+      name.toLowerCase() === currentUserDisplayName.toLowerCase();
+
+    setServerBill((prev) =>
+      prev
+        ? {
+            ...prev,
+            paidByName: name,
+            isCurrentUserPayer: isSelf,
+          }
+        : prev,
+    );
+    setIsPaidByDialogOpen(false);
+
+    try {
+      await updateBillDetails(splitbotApiBase, billId, {
+        title: bill.title,
+        billDate: bill.billDate,
+        place: bill.place,
+        members: membersOrdered,
+        paidByName: name,
+        items: bill.items.map((item) => ({
+          id: item.id,
+          name: item.name,
+          totalPriceCents: item.totalPriceCents,
+          assignees: item.assignees ?? [],
+        })),
+        charges: bill.charges ?? [],
+      });
+      const fetched = await getBillDetails(splitbotApiBase, billId);
+      setServerBill(mapApiBillToDetails(fetched));
+    } catch (e) {
+      setServerBill((prev) =>
+        prev
+          ? {
+              ...prev,
+              paidByName: previousPaidByName,
+              isCurrentUserPayer: previousIsPayer,
+              paymentDetails: previousPaymentDetails,
+            }
+          : prev,
+      );
+      setPaymentToastMessage(toUserFriendlyErrorMessage(e));
+    } finally {
+      setIsSavingPaidBy(false);
+    }
   };
 
   const togglePaid = async (name: string, next: boolean) => {
@@ -578,6 +674,8 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
             place: bill.place ?? null,
             currency: bill.currency,
             members: membersOrdered,
+            paidByName: bill.paidByName ?? null,
+            paymentDetails: bill.paymentDetails ?? null,
             items: bill.items.map((item) => ({
               ...item,
               assignees: item.assignees ?? [],
@@ -843,7 +941,254 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
             )}
           </Card>
         </div>
+
+        <div className="space-y-2">
+          <div>
+            <CardTitle className="text-xl">Payment details</CardTitle>
+            <CardDescription>
+              {bill.paidByName?.trim()
+                ? `How to pay ${bill.paidByName.trim()}.`
+                : "How to pay the person who fronted the bill."}
+            </CardDescription>
+          </div>
+          <Card className="space-y-3 rounded-[22px] border-0 p-3.5">
+            {membersOrdered.length > 0 ? (
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="shrink-0 text-sm text-muted-foreground">
+                    Paid by
+                  </span>
+                  {bill.paidByName?.trim() ? (
+                    <>
+                      <MemberAvatar
+                        name={bill.paidByName.trim()}
+                        avatarBgColors={
+                          resolveMember(bill.paidByName.trim())?.avatarBgColors
+                        }
+                        photoUrl={resolvePhotoUrlForName(bill.paidByName.trim())}
+                      />
+                      <span className="truncate font-medium tracking-[-0.01em]">
+                        {bill.paidByName.trim()}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      Not set
+                    </span>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0"
+                  disabled={isSavingPaidBy}
+                  onClick={() => setIsPaidByDialogOpen(true)}
+                >
+                  {isSavingPaidBy ? "Updating…" : "Update"}
+                </Button>
+              </div>
+            ) : null}
+
+            {membersOrdered.length > 0 ? (
+              <div className="border-t border-white/[0.07]" />
+            ) : null}
+
+            {isEditingPaymentDetails && bill.isCurrentUserPayer ? (
+              <div className="space-y-3">
+                <Input
+                  value={draftPaymentDetails}
+                  disabled={isSavingPaymentDetails}
+                  placeholder="e.g. Venmo @you"
+                  maxLength={TEXT_LIMITS.paymentDetails}
+                  onChange={(e) => setDraftPaymentDetails(e.target.value)}
+                  aria-label="Payment details"
+                />
+                {paymentDetailsError ? (
+                  <p className="text-sm text-destructive">{paymentDetailsError}</p>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    disabled={isSavingPaymentDetails}
+                    onClick={() => {
+                      if (!splitbotApiBase) return;
+                      void (async () => {
+                        setIsSavingPaymentDetails(true);
+                        setPaymentDetailsError(null);
+                        try {
+                          const clipped =
+                            sanitizeUserText(
+                              draftPaymentDetails,
+                              TEXT_LIMITS.paymentDetails,
+                            ) || null;
+                          const result = await updateMyPaymentDetails(
+                            splitbotApiBase,
+                            clipped,
+                          );
+                          setServerBill((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  paymentDetails: result.paymentDetails,
+                                }
+                              : prev,
+                          );
+                          setIsEditingPaymentDetails(false);
+                        } catch (e) {
+                          setPaymentDetailsError(
+                            toUserFriendlyErrorMessage(e),
+                          );
+                        } finally {
+                          setIsSavingPaymentDetails(false);
+                        }
+                      })();
+                    }}
+                  >
+                    {isSavingPaymentDetails ? "Saving…" : "Save"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isSavingPaymentDetails}
+                    onClick={() => {
+                      setIsEditingPaymentDetails(false);
+                      setPaymentDetailsError(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : bill.paymentDetails?.trim() ? (
+              <div className="flex items-center justify-between gap-3">
+                <p className="min-w-0 break-words text-sm font-medium tracking-[-0.01em]">
+                  {bill.paymentDetails.trim()}
+                </p>
+                <div className="flex shrink-0 gap-2">
+                  {bill.isCurrentUserPayer ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setDraftPaymentDetails(bill.paymentDetails?.trim() ?? "");
+                        setIsEditingPaymentDetails(true);
+                        setPaymentDetailsError(null);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      const text = bill.paymentDetails?.trim();
+                      if (!text) return;
+                      void (async () => {
+                        try {
+                          await navigator.clipboard.writeText(text);
+                          setCopiedPaymentDetails(true);
+                          window.setTimeout(
+                            () => setCopiedPaymentDetails(false),
+                            1500,
+                          );
+                        } catch {
+                          setPaymentToastMessage(
+                            "Could not copy payment details.",
+                          );
+                        }
+                      })();
+                    }}
+                  >
+                    {copiedPaymentDetails ? "Copied" : "Copy"}
+                  </Button>
+                </div>
+              </div>
+            ) : bill.isCurrentUserPayer ? (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Add how others should pay you (Venmo, PayNow, bank, etc.).
+                </p>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setDraftPaymentDetails("");
+                    setIsEditingPaymentDetails(true);
+                    setPaymentDetailsError(null);
+                  }}
+                >
+                  Add payment details
+                </Button>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {bill.paidByName?.trim()
+                  ? `${bill.paidByName.trim()} hasn’t added payment details yet.`
+                  : "No payment details yet."}
+              </p>
+            )}
+          </Card>
+        </div>
       </div>
+
+      <Dialog
+        open={isPaidByDialogOpen}
+        onOpenChange={(nextOpen) => {
+          if (isSavingPaidBy) return;
+          setIsPaidByDialogOpen(nextOpen);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Who paid?</DialogTitle>
+            <DialogDescription>
+              Choose who fronted the bill. Others pay them back.
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="max-h-[min(50vh,20rem)] space-y-1 overflow-y-auto">
+            {membersOrdered.map((name) => {
+              const selected =
+                (bill.paidByName ?? "").trim().toLowerCase() ===
+                name.toLowerCase();
+              const mem = resolveMember(name);
+              return (
+                <li key={`paid-by-option-${name}`}>
+                  <button
+                    type="button"
+                    disabled={isSavingPaidBy}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-[14px] px-3 py-2.5 text-left transition-colors hover:bg-white/[0.06]",
+                      selected && "bg-white/[0.08]",
+                    )}
+                    onClick={() => {
+                      void selectPaidBy(name);
+                    }}
+                  >
+                    <MemberAvatar
+                      name={name}
+                      avatarBgColors={mem?.avatarBgColors}
+                      photoUrl={resolvePhotoUrlForName(name)}
+                    />
+                    <span className="min-w-0 flex-1 truncate font-medium tracking-[-0.01em]">
+                      {name}
+                    </span>
+                    {selected ? (
+                      <Icon
+                        name="IconCheck"
+                        size={20}
+                        className="shrink-0 text-foreground"
+                        aria-label="Selected"
+                      />
+                    ) : (
+                      <span className="size-5 shrink-0" aria-hidden />
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={isDeleteDialogOpen}

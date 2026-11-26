@@ -34,6 +34,9 @@ type ApiBillDetails = {
     assignees: string[];
   }>;
   charges?: ApiBillCharge[];
+  paidByName?: string | null;
+  paymentDetails?: string | null;
+  isCurrentUserPayer?: boolean;
 };
 
 type ApiBillHistoryEntry = {
@@ -87,6 +90,7 @@ type MockBillRecord = ApiBillDetails & {
 
 const bills = new Map<string, MockBillRecord>();
 const paidByBill = new Map<string, Set<string>>();
+let mockViewerPaymentDetails: string | null = "Venmo @alice";
 let seeded = false;
 let billSeq = 1000;
 
@@ -123,6 +127,9 @@ function seedIfNeeded(): void {
         label: c.label ?? null,
         ratePct: c.ratePct ?? null,
       })),
+      paidByName: bill.paidByName ?? bill.members?.[0] ?? "Alice",
+      paymentDetails: bill.paymentDetails ?? null,
+      isCurrentUserPayer: bill.isCurrentUserPayer ?? true,
       createdAt: `${bill.billDate}T12:00:00.000Z`,
     });
     if (bill.settled) {
@@ -197,6 +204,9 @@ export async function mockCreateBillSession(body: {
     })),
     items: [],
     charges: [],
+    paidByName: mockMembers[0] ?? "Alice",
+    paymentDetails: mockViewerPaymentDetails,
+    isCurrentUserPayer: true,
     createdAt: new Date().toISOString(),
   });
   paidByBill.set(billId, new Set());
@@ -295,6 +305,22 @@ export async function mockGetBillDetails(billId: string): Promise<ApiBillDetails
   return structuredClone(rest);
 }
 
+export async function mockUpdateMyPaymentDetails(
+  paymentDetails: string | null,
+): Promise<{ ok: true; paymentDetails: string | null }> {
+  seedIfNeeded();
+  await mockWait(mockDelayMs("VITE_SPLITBOT_MOCK_SAVE_MS", 200));
+  const next =
+    typeof paymentDetails === "string" ? paymentDetails.trim() || null : null;
+  mockViewerPaymentDetails = next;
+  for (const bill of bills.values()) {
+    if (bill.isCurrentUserPayer) {
+      bill.paymentDetails = next;
+    }
+  }
+  return { ok: true, paymentDetails: next };
+}
+
 export async function mockUpdateBillDetails(
   billId: string,
   body: {
@@ -302,6 +328,7 @@ export async function mockUpdateBillDetails(
     billDate?: string;
     place?: string | null;
     members?: string[];
+    paidByName?: string | null;
     items?: Array<{
       id?: string;
       name: string;
@@ -331,6 +358,16 @@ export async function mockUpdateBillDetails(
   bill.title = body.title;
   if (body.billDate !== undefined) bill.billDate = body.billDate;
   if (body.place !== undefined) bill.place = body.place;
+  if (body.paidByName !== undefined) {
+    bill.paidByName = body.paidByName;
+    bill.isCurrentUserPayer =
+      !body.paidByName ||
+      body.paidByName.trim().toLowerCase() === "alice" ||
+      body.paidByName === bill.members?.[0];
+    if (bill.isCurrentUserPayer) {
+      bill.paymentDetails = mockViewerPaymentDetails;
+    }
+  }
   if (body.members) {
     bill.members = body.members;
     bill.memberProfiles = body.members.map((name, i) => ({

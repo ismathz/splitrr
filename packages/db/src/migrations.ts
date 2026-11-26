@@ -14,6 +14,7 @@ import {
   v11ChatMembersPlugin,
   v12GroupJoinOnboarding,
   v13PendingAddedNotifications,
+  v14BillPaidBy,
 } from "./schema";
 
 const orderedMigrations: Array<{ name: string; sql: string }> = [
@@ -50,6 +51,10 @@ const orderedMigrations: Array<{ name: string; sql: string }> = [
   {
     name: "013_pending_added_notifications.sql",
     sql: v13PendingAddedNotifications,
+  },
+  {
+    name: "014_bill_paid_by.sql",
+    sql: v14BillPaidBy,
   },
 ];
 

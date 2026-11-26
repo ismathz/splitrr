@@ -12,6 +12,8 @@ export interface CreateBillSessionInput {
   title: string;
   status: string;
   createdByUserId?: number;
+  /** Who fronted the merchant; defaults to createdByUserId when omitted. */
+  paidByUserId?: number;
   /** ISO date YYYY-MM-DD; defaults to today if omitted. */
   billDate?: string;
   place?: string | null;
@@ -491,17 +493,23 @@ export class BillSessionRepository {
     const billDate =
       input.billDate ?? new Date().toISOString().slice(0, 10);
     const currency = resolveCurrencyCode(input.currency);
+    const createdBy = input.createdByUserId ?? null;
+    const paidBy = input.paidByUserId ?? createdBy;
     this.db
       .query(
-        `INSERT INTO bill_sessions (id, group_id, title, status, created_by_user_id, bill_date, place, currency)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
+        `INSERT INTO bill_sessions (
+           id, group_id, title, status, created_by_user_id, paid_by_user_id,
+           bill_date, place, currency
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
       )
       .run(
         input.id,
         input.groupId,
         input.title,
         input.status,
-        input.createdByUserId ?? null,
+        createdBy,
+        paidBy,
         billDate,
         input.place ?? null,
         currency

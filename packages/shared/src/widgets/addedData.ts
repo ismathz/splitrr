@@ -23,6 +23,7 @@ export function buildAddedChatData(
               bs.title AS title,
               bs.currency AS currency,
               bs.created_by_user_id AS createdByUserId,
+              bs.paid_by_user_id AS paidByUserId,
               g.telegram_chat_id AS chatId
        FROM bill_sessions bs
        JOIN groups g ON g.id = bs.group_id
@@ -33,6 +34,7 @@ export function buildAddedChatData(
     title: string;
     currency: string;
     createdByUserId: number | null;
+    paidByUserId: number | null;
     chatId: string;
   } | null;
   if (!bill) return null;
@@ -130,10 +132,11 @@ export function buildAddedChatData(
     .get(input.billId, input.memberName) as { paid: number } | null;
 
   let pay: string | undefined;
-  if (bill.createdByUserId != null) {
+  const payerUserId = bill.paidByUserId ?? bill.createdByUserId;
+  if (payerUserId != null) {
     const payer = db
       .query(`SELECT payment_details FROM users WHERE id = ?1`)
-      .get(bill.createdByUserId) as { payment_details: string | null } | null;
+      .get(payerUserId) as { payment_details: string | null } | null;
     const details = payer?.payment_details?.trim();
     if (details) pay = truncateUtf8(details, 120);
   }

@@ -13,6 +13,7 @@ import {
   UserGroupIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
+import { CheckIcon as CheckIconSolid } from "@heroicons/react/24/solid";
 import type { ComponentProps, ComponentType, SVGProps } from "react";
 
 import { cn } from "@/lib/utils";
@@ -21,6 +22,7 @@ const icons = {
   IconAddImage: PhotoIcon,
   IconArrowLeft: ArrowLeftIcon,
   IconCalendar: CalendarDaysIcon,
+  IconCheck: CheckIconSolid,
   IconCheckmark1: CheckIcon,
   IconChevronDownMedium: ChevronDownIcon,
   IconChevronGrabberVertical: ChevronUpDownIcon,

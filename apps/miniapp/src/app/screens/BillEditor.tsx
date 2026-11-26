@@ -94,6 +94,7 @@ import {
   resolveBillContextForApi,
   runReceiptOcr,
   updateBillDetails,
+  updateMyPaymentDetails,
   uploadReceipt,
 } from "@/lib/splitbotApi";
 import { getItemDisplayEmoji } from "@/lib/itemEmoji";
@@ -222,6 +223,10 @@ export interface BillEditorInitialBill {
   place: string | null;
   currency: string;
   members?: string[];
+  /** Who fronted the merchant (display name). */
+  paidByName?: string | null;
+  /** Payer payment copy-text, when known. */
+  paymentDetails?: string | null;
   items: Item[];
   charges?: Array<{
     id?: string;
@@ -361,6 +366,16 @@ export function BillEditor(props: BillEditorProps) {
     }
     return [];
   });
+  const [paidByName, setPaidByName] = useState<string | null>(() => {
+    const initial = initialBill?.paidByName?.trim();
+    if (initial) return initial;
+    return null;
+  });
+  const [isPaidByDialogOpen, setIsPaidByDialogOpen] = useState(false);
+  /** null = untouched, so we never overwrite saved details with an empty value. */
+  const [paymentDetailsDraft, setPaymentDetailsDraft] = useState<string | null>(
+    null,
+  );
   const [membersDrawerOpen, setMembersDrawerOpen] = useState(false);
   const [currencyDrawerOpen, setCurrencyDrawerOpen] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -814,6 +829,37 @@ export function BillEditor(props: BillEditorProps) {
     return [...fromGroup, ...fromManual];
   }, [groupMemberNames, billMembers]);
 
+  useEffect(() => {
+    if (billMembersOrdered.length === 0) {
+      if (paidByName != null) setPaidByName(null);
+      return;
+    }
+    const stillOnBill =
+      paidByName != null &&
+      billMembersOrdered.some(
+        (m) => m.toLowerCase() === paidByName.toLowerCase(),
+      );
+    if (stillOnBill) return;
+    const self =
+      currentUserDisplayName &&
+      billMembersOrdered.find(
+        (m) => m.toLowerCase() === currentUserDisplayName.toLowerCase(),
+      );
+    setPaidByName(self ?? billMembersOrdered[0] ?? null);
+  }, [billMembersOrdered, paidByName, currentUserDisplayName]);
+
+  const isPaidBySelf =
+    paidByName != null &&
+    currentUserDisplayName != null &&
+    paidByName.toLowerCase() === currentUserDisplayName.toLowerCase();
+  const paidByMember = paidByName ? memberByName.get(paidByName) : undefined;
+  const knownPaymentDetails =
+    paidByName &&
+    initialBill?.paidByName &&
+    paidByName.toLowerCase() === initialBill.paidByName.toLowerCase()
+      ? initialBill.paymentDetails?.trim() || ""
+      : "";
+
   const manualOnlyBillMembers = useMemo(
     () => billMembers.filter((m) => !isNameInGroup(m, groupMemberNames)),
     [billMembers, groupMemberNames],
@@ -1129,6 +1175,9 @@ export function BillEditor(props: BillEditorProps) {
       members: billMembersOrdered.map((m) =>
         sanitizeUserText(m, TEXT_LIMITS.memberName),
       ).filter(Boolean),
+      paidByName: paidByName
+        ? sanitizeUserText(paidByName, TEXT_LIMITS.memberName) || null
+        : null,
       items: items
         .map((it) => ({
           id: it.id,
@@ -1142,12 +1191,24 @@ export function BillEditor(props: BillEditorProps) {
       charges: chargesPayload,
     };
 
+    const persistPaymentDetails = async () => {
+      if (!splitbotApiBase || paymentDetailsDraft === null || !isPaidBySelf) {
+        return;
+      }
+      const next =
+        sanitizeUserText(paymentDetailsDraft, TEXT_LIMITS.paymentDetails) ||
+        null;
+      if (next === (initialBill?.paymentDetails?.trim() || null)) return;
+      await updateMyPaymentDetails(splitbotApiBase, next);
+    };
+
     // Edit mode: PATCH the existing bill.
     if (isEditMode && editingBillId && splitbotApiBase) {
       setIsSavingBill(true);
       try {
         const normalizedTitle =
           sanitizeUserText(billTitle, TEXT_LIMITS.billTitle) || "Untitled bill";
+        await persistPaymentDetails();
         await updateBillDetails(splitbotApiBase, editingBillId, {
           title: normalizedTitle,
           ...persistPayload,
@@ -1167,6 +1228,7 @@ export function BillEditor(props: BillEditorProps) {
       try {
         const normalizedTitle =
           sanitizeUserText(billTitle, TEXT_LIMITS.billTitle) || "Untitled bill";
+        await persistPaymentDetails();
         await updateBillDetails(splitbotApiBase, serverBillId, {
           title: normalizedTitle,
           ...persistPayload,
@@ -1200,6 +1262,7 @@ export function BillEditor(props: BillEditorProps) {
         currency: normalizeCurrencyCode(currencyCode),
       });
       setServerBillId(billId);
+      await persistPaymentDetails();
       await updateBillDetails(splitbotApiBase, billId, {
         title,
         ...persistPayload,
@@ -1222,6 +1285,10 @@ export function BillEditor(props: BillEditorProps) {
     billDate,
     billPlace,
     billMembersOrdered,
+    paidByName,
+    paymentDetailsDraft,
+    isPaidBySelf,
+    initialBill?.paymentDetails,
     items,
     isServiceChargeEnabled,
     isTaxEnabled,
@@ -1477,6 +1544,84 @@ export function BillEditor(props: BillEditorProps) {
             ) : null}
           </div>
         </div>
+
+        {billMembersOrdered.length > 0 ? (
+          <div className="space-y-2">
+            <div>
+              <CardTitle className="text-xl">Payment details</CardTitle>
+              <CardDescription>
+                {paidByName
+                  ? `How to pay ${paidByName}.`
+                  : "How to pay the person who fronted the bill."}
+              </CardDescription>
+            </div>
+            <Card className="space-y-3 rounded-[22px] border-0 p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="shrink-0 text-sm text-muted-foreground">
+                    Paid by
+                  </span>
+                  {paidByName ? (
+                    <>
+                      <MemberAvatar
+                        name={paidByName}
+                        avatarBgColors={paidByMember?.avatarBgColors}
+                        photoUrl={resolveMemberPhotoUrl(paidByMember)}
+                      />
+                      <span className="truncate font-medium tracking-[-0.01em]">
+                        {paidByName}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      Not set
+                    </span>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => setIsPaidByDialogOpen(true)}
+                >
+                  Update
+                </Button>
+              </div>
+
+              <div className="border-t border-white/[0.07]" />
+
+              {isPaidBySelf ? (
+                <div className="space-y-2">
+                  <Input
+                    value={
+                      paymentDetailsDraft ??
+                      initialBill?.paymentDetails?.trim() ??
+                      ""
+                    }
+                    placeholder="e.g. Venmo @you"
+                    maxLength={TEXT_LIMITS.paymentDetails}
+                    onChange={(e) => setPaymentDetailsDraft(e.target.value)}
+                    aria-label="Payment details"
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    How others should pay you (Venmo, PayNow, bank, etc.).
+                  </p>
+                </div>
+              ) : knownPaymentDetails ? (
+                <p className="break-words text-sm font-medium tracking-[-0.01em]">
+                  {knownPaymentDetails}
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {paidByName
+                    ? `${paidByName} can add payment details on the bill.`
+                    : "Pick who paid to see how to pay them."}
+                </p>
+              )}
+            </Card>
+          </div>
+        ) : null}
+
         <div className="space-y-2">
           <AutoAnimateContainer className="space-y-2">
             {items.map((item) => (
@@ -2344,6 +2489,59 @@ export function BillEditor(props: BillEditorProps) {
 
   const billDrawers = (
     <>
+      <Dialog open={isPaidByDialogOpen} onOpenChange={setIsPaidByDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Who paid?</DialogTitle>
+            <DialogDescription>
+              Choose who fronted the bill. Others pay them back.
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="max-h-[min(50vh,20rem)] space-y-1 overflow-y-auto">
+            {billMembersOrdered.map((name) => {
+              const selected =
+                paidByName != null &&
+                name.toLowerCase() === paidByName.toLowerCase();
+              const mem = memberByName.get(name);
+              return (
+                <li key={`paid-by-option-${name}`}>
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-[14px] px-3 py-2.5 text-left transition-colors hover:bg-white/[0.06]",
+                      selected && "bg-white/[0.08]",
+                    )}
+                    onClick={() => {
+                      setPaidByName(name);
+                      setIsPaidByDialogOpen(false);
+                    }}
+                  >
+                    <MemberAvatar
+                      name={name}
+                      avatarBgColors={mem?.avatarBgColors}
+                      photoUrl={resolveMemberPhotoUrl(mem)}
+                    />
+                    <span className="min-w-0 flex-1 truncate font-medium tracking-[-0.01em]">
+                      {name}
+                    </span>
+                    {selected ? (
+                      <Icon
+                        name="IconCheck"
+                        size={20}
+                        className="shrink-0 text-foreground"
+                        aria-label="Selected"
+                      />
+                    ) : (
+                      <span className="size-5 shrink-0" aria-hidden />
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </DialogContent>
+      </Dialog>
+
       <Drawer open={membersDrawerOpen} onOpenChange={setMembersDrawerOpen}>
         <DrawerContent className="rounded-t-[28px] border-none bg-transparent p-0">
           <DrawerHeader>

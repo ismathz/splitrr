@@ -53,4 +53,10 @@ export type BillDetails = {
   items: Item[];
   /** Service / tax / tip / custom adjustments. */
   charges?: BillCharge[];
+  /** Who fronted the merchant (display name). */
+  paidByName?: string | null;
+  /** Payer payment copy-text for reimbursing. */
+  paymentDetails?: string | null;
+  /** True when the viewer is the payer (can edit payment details). */
+  isCurrentUserPayer?: boolean;
 };

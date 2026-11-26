@@ -371,6 +371,109 @@ function resolveInternalUserIdFromTelegram(
   return row?.id ?? null;
 }
 
+function displayNameForInternalUserId(userId: number): string {
+  const row = db
+    .query(
+      `SELECT username, first_name, last_name, telegram_user_id
+       FROM users WHERE id = ?1`,
+    )
+    .get(userId) as {
+    username: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    telegram_user_id: string;
+  } | null;
+  if (!row) return "Someone";
+  const first = row.first_name?.trim() ?? "";
+  const last = row.last_name?.trim() ?? "";
+  const full = `${first} ${last}`.trim();
+  if (full) return full;
+  const username = row.username?.trim();
+  if (username) return username;
+  if (row.telegram_user_id.startsWith("name:")) {
+    return row.telegram_user_id.slice("name:".length);
+  }
+  return row.telegram_user_id;
+}
+
+/**
+ * Resolve "who paid" from a bill-member display name.
+ * Prefers a real Telegram roster user over a name: synthetic placeholder.
+ */
+function resolvePaidByInternalUserIdFromName(input: {
+  paidByName: string;
+  groupId: number | null;
+}): number | null {
+  const name = sanitizeUserText(input.paidByName, TEXT_LIMITS.memberName);
+  if (!name) return null;
+  const key = name.toLowerCase();
+
+  if (input.groupId != null) {
+    for (const m of roster.listMembers(input.groupId)) {
+      if (m.name.trim().toLowerCase() === key) {
+        const internal = resolveInternalUserIdFromTelegram(m.tgUserId);
+        if (internal != null) return internal;
+      }
+      const uname = m.username?.trim().toLowerCase().replace(/^@/, "");
+      if (uname && (uname === key || `@${uname}` === key)) {
+        const internal = resolveInternalUserIdFromTelegram(m.tgUserId);
+        if (internal != null) return internal;
+      }
+    }
+  }
+
+  const syntheticTelegramUserId = `name:${key}`;
+  db.query(
+    `INSERT INTO users (telegram_user_id, first_name)
+     VALUES (?1, ?2)
+     ON CONFLICT(telegram_user_id) DO UPDATE SET
+       first_name = excluded.first_name`,
+  ).run(syntheticTelegramUserId, name);
+  const row = db
+    .query("SELECT id FROM users WHERE telegram_user_id = ?1")
+    .get(syntheticTelegramUserId) as { id: number } | null;
+  return row?.id ?? null;
+}
+
+function paymentDetailsForUserId(userId: number | null): string | null {
+  if (userId == null) return null;
+  const payer = db
+    .query(`SELECT payment_details FROM users WHERE id = ?1`)
+    .get(userId) as { payment_details: string | null } | null;
+  const details = payer?.payment_details?.trim();
+  return details || null;
+}
+
+function isAuthUserPayer(input: {
+  authUser: { id: number; first_name?: string; last_name?: string; username?: string } | null;
+  paidByUserId: number | null;
+}): boolean {
+  if (input.authUser == null || input.paidByUserId == null) return false;
+  const payer = db
+    .query(
+      `SELECT telegram_user_id, first_name, last_name, username
+       FROM users WHERE id = ?1`,
+    )
+    .get(input.paidByUserId) as {
+    telegram_user_id: string;
+    first_name: string | null;
+    last_name: string | null;
+    username: string | null;
+  } | null;
+  if (!payer) return false;
+  if (payer.telegram_user_id === String(input.authUser.id)) return true;
+  if (!payer.telegram_user_id.startsWith("name:")) return false;
+  const first = input.authUser.first_name?.trim() ?? "";
+  const last = input.authUser.last_name?.trim() ?? "";
+  const full = `${first} ${last}`.trim().toLowerCase();
+  const uname = input.authUser.username?.trim().toLowerCase() ?? "";
+  const synthetic = payer.telegram_user_id.slice("name:".length).toLowerCase();
+  if (full && full === synthetic) return true;
+  if (first && first.toLowerCase() === synthetic) return true;
+  if (uname && (uname === synthetic || `@${uname}` === synthetic)) return true;
+  return false;
+}
+
 app.post("/api/bills", async (c) => {
   try {
     const body = await c.req.json<{
@@ -417,6 +520,7 @@ app.post("/api/bills", async (c) => {
       title,
       status: "draft",
       createdByUserId: createdByInternalId ?? undefined,
+      paidByUserId: createdByInternalId ?? undefined,
       billDate: body.billDate,
       place: sanitizeOptionalUserText(body.place, TEXT_LIMITS.place),
       currency: body.currency
@@ -779,7 +883,8 @@ app.get("/api/bills/:billId", (c) => {
   const billId = c.req.param("billId");
   const session = db
     .query(
-      `SELECT id, title, status, currency, bill_date, place
+      `SELECT id, title, status, currency, bill_date, place,
+              created_by_user_id, paid_by_user_id
        FROM bill_sessions
        WHERE id = ?1`
     )
@@ -791,12 +896,25 @@ app.get("/api/bills/:billId", (c) => {
         currency: string;
         bill_date: string;
         place: string | null;
+        created_by_user_id: number | null;
+        paid_by_user_id: number | null;
       }
     | null;
 
   if (!session) {
     return c.json({ error: "Bill not found" }, 404);
   }
+
+  const paidByUserId =
+    session.paid_by_user_id ?? session.created_by_user_id ?? null;
+  const paidByName =
+    paidByUserId != null ? displayNameForInternalUserId(paidByUserId) : null;
+  const paymentDetails = paymentDetailsForUserId(paidByUserId);
+  const authUser = c.get("telegramUser");
+  const isCurrentUserPayer = isAuthUserPayer({
+    authUser,
+    paidByUserId,
+  });
 
   const items = db
     .query(
@@ -936,7 +1054,46 @@ app.get("/api/bills/:billId", (c) => {
     memberProfiles,
     items: mappedItems,
     charges,
+    /** Who fronted the merchant (display name). */
+    paidByName,
+    /** Payer payment copy-text so members can reimburse. */
+    paymentDetails,
+    /** True when the authenticated viewer is the payer (can edit payment details). */
+    isCurrentUserPayer,
   });
+});
+
+app.patch("/api/me/payment-details", async (c) => {
+  const authUser = c.get("telegramUser");
+  if (!authUser?.id) {
+    return c.json({ error: "Authentication required" }, 401);
+  }
+  let body: { paymentDetails?: string | null } = {};
+  try {
+    body = await c.req.json<{ paymentDetails?: string | null }>();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const raw =
+    body.paymentDetails == null ? "" : String(body.paymentDetails);
+  const clipped = sanitizeUserText(raw, TEXT_LIMITS.paymentDetails);
+  const next = clipped || null;
+
+  const internalId = roster.upsertUser({
+    telegramUserId: String(authUser.id),
+    username: authUser.username ?? null,
+    firstName: authUser.first_name ?? null,
+    lastName: authUser.last_name ?? null,
+    photoUrl: authUser.photo_url,
+  });
+
+  db.query(`UPDATE users SET payment_details = ?2 WHERE id = ?1`).run(
+    internalId,
+    next,
+  );
+
+  return c.json({ ok: true, paymentDetails: next });
 });
 
 app.patch("/api/bills/:billId", async (c) => {
@@ -946,6 +1103,8 @@ app.patch("/api/bills/:billId", async (c) => {
     billDate?: string;
     place?: string | null;
     members?: string[];
+    /** Display name of who fronted the merchant. */
+    paidByName?: string | null;
     items?: Array<{
       id?: string;
       name: string;
@@ -995,6 +1154,27 @@ app.patch("/api/bills/:billId", async (c) => {
     .query("SELECT group_id FROM bill_sessions WHERE id = ?1")
     .get(billId) as { group_id: number } | null;
   const groupId = sessionMeta?.group_id ?? null;
+
+  if (body.paidByName !== undefined) {
+    const paidByInternalId =
+      body.paidByName == null || !String(body.paidByName).trim()
+        ? null
+        : resolvePaidByInternalUserIdFromName({
+            paidByName: String(body.paidByName),
+            groupId,
+          });
+    db.query(
+      `UPDATE bill_sessions
+       SET paid_by_user_id = ?2, updated_at = datetime('now')
+       WHERE id = ?1`,
+    ).run(billId, paidByInternalId);
+    if (paidByInternalId != null && groupId != null) {
+      db.query(
+        `INSERT OR IGNORE INTO group_members (group_id, user_id)
+         VALUES (?1, ?2)`,
+      ).run(groupId, paidByInternalId);
+    }
+  }
 
   const upsertUserByName = db.query(
     `INSERT INTO users (telegram_user_id, first_name)

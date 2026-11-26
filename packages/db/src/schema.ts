@@ -279,3 +279,16 @@ CREATE INDEX IF NOT EXISTS idx_pending_added_bill_undelivered
 CREATE INDEX IF NOT EXISTS idx_pending_added_user_undelivered
   ON pending_added_notifications(telegram_user_id, delivered_at);
 `;
+
+/**
+ * Who fronted the merchant for a bill (reimbursements go to this user).
+ * Defaults to created_by when unset; backfill copies created_by.
+ */
+export const v14BillPaidBy = `
+ALTER TABLE bill_sessions ADD COLUMN paid_by_user_id INTEGER;
+
+UPDATE bill_sessions
+SET paid_by_user_id = created_by_user_id
+WHERE paid_by_user_id IS NULL
+  AND created_by_user_id IS NOT NULL;
+`;

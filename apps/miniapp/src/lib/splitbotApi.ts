@@ -20,6 +20,7 @@ import {
   mockRunReceiptOcr,
   mockUpdateBillDetails,
   mockUpdateBillPaymentStatus,
+  mockUpdateMyPaymentDetails,
   mockUploadReceipt,
 } from "@/lib/splitbotApiMock";
 
@@ -272,6 +273,12 @@ export type ApiBillDetails = {
     assignees: string[];
   }>;
   charges?: ApiBillCharge[];
+  /** Who fronted the merchant (display name). */
+  paidByName?: string | null;
+  /** Payer payment copy-text so members can reimburse. */
+  paymentDetails?: string | null;
+  /** True when the authenticated viewer is the payer. */
+  isCurrentUserPayer?: boolean;
 };
 
 export type ApiBillHistoryEntry = {
@@ -388,6 +395,26 @@ export async function getBillDetails(
   return res.json() as Promise<ApiBillDetails>;
 }
 
+export async function updateMyPaymentDetails(
+  base: string,
+  paymentDetails: string | null,
+): Promise<{ ok: true; paymentDetails: string | null }> {
+  if (isDevMockDataEnabled()) {
+    void base;
+    return mockUpdateMyPaymentDetails(paymentDetails);
+  }
+  const res = await apiFetch(`${base}/api/me/payment-details`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paymentDetails }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(t || `update payment details failed: ${res.status}`);
+  }
+  return res.json() as Promise<{ ok: true; paymentDetails: string | null }>;
+}
+
 export async function updateBillDetails(
   base: string,
   billId: string,
@@ -396,6 +423,7 @@ export async function updateBillDetails(
     billDate?: string;
     place?: string | null;
     members?: string[];
+    paidByName?: string | null;
     items?: Array<{
       id?: string;
       name: string;

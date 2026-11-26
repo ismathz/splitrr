@@ -68,6 +68,9 @@ export const mockBills: BillDetails[] = import.meta.env.DEV
         settled: false,
         members: ["Alice", "Bob", "Carol", "Dave", "Eve"],
         items: mockNewBillItems,
+        paidByName: "Alice",
+        paymentDetails: "Venmo @alice",
+        isCurrentUserPayer: true,
       },
       {
         id: "bill-1002",
