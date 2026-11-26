@@ -1545,83 +1545,6 @@ export function BillEditor(props: BillEditorProps) {
           </div>
         </div>
 
-        {billMembersOrdered.length > 0 ? (
-          <div className="space-y-2">
-            <div>
-              <CardTitle className="text-xl">Payment details</CardTitle>
-              <CardDescription>
-                {paidByName
-                  ? `How to pay ${paidByName}.`
-                  : "How to pay the person who fronted the bill."}
-              </CardDescription>
-            </div>
-            <Card className="space-y-3 rounded-[22px] border-0 p-3.5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="shrink-0 text-sm text-muted-foreground">
-                    Paid by
-                  </span>
-                  {paidByName ? (
-                    <>
-                      <MemberAvatar
-                        name={paidByName}
-                        avatarBgColors={paidByMember?.avatarBgColors}
-                        photoUrl={resolveMemberPhotoUrl(paidByMember)}
-                      />
-                      <span className="truncate font-medium tracking-[-0.01em]">
-                        {paidByName}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">
-                      Not set
-                    </span>
-                  )}
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="shrink-0"
-                  onClick={() => setIsPaidByDialogOpen(true)}
-                >
-                  Update
-                </Button>
-              </div>
-
-              <div className="border-t border-white/[0.07]" />
-
-              {isPaidBySelf ? (
-                <div className="space-y-2">
-                  <Input
-                    value={
-                      paymentDetailsDraft ??
-                      initialBill?.paymentDetails?.trim() ??
-                      ""
-                    }
-                    placeholder="e.g. Venmo @you"
-                    maxLength={TEXT_LIMITS.paymentDetails}
-                    onChange={(e) => setPaymentDetailsDraft(e.target.value)}
-                    aria-label="Payment details"
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    How others should pay you (Venmo, PayNow, bank, etc.).
-                  </p>
-                </div>
-              ) : knownPaymentDetails ? (
-                <p className="break-words text-sm font-medium tracking-[-0.01em]">
-                  {knownPaymentDetails}
-                </p>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {paidByName
-                    ? `${paidByName} can add payment details on the bill.`
-                    : "Pick who paid to see how to pay them."}
-                </p>
-              )}
-            </Card>
-          </div>
-        ) : null}
-
         <div className="space-y-2">
           <AutoAnimateContainer className="space-y-2">
             {items.map((item) => (
@@ -2448,6 +2371,81 @@ export function BillEditor(props: BillEditorProps) {
           </CardContent>
         </Card>
       </div>
+
+      {billMembersOrdered.length > 0 ? (
+        <div className={cn("space-y-2", showOnlyOcrStatus && "hidden")}>
+          <div>
+            <CardTitle className="text-xl">Payment details</CardTitle>
+            <CardDescription>
+              {paidByName
+                ? `How to pay ${paidByName}.`
+                : "How to pay the person who fronted the bill."}
+            </CardDescription>
+          </div>
+          <Card className="space-y-3 rounded-[22px] border-0 p-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="shrink-0 text-sm text-muted-foreground">
+                  Paid by
+                </span>
+                {paidByName ? (
+                  <>
+                    <MemberAvatar
+                      name={paidByName}
+                      avatarBgColors={paidByMember?.avatarBgColors}
+                      photoUrl={resolveMemberPhotoUrl(paidByMember)}
+                    />
+                    <span className="truncate font-medium tracking-[-0.01em]">
+                      {paidByName}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-sm text-muted-foreground">Not set</span>
+                )}
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0"
+                onClick={() => setIsPaidByDialogOpen(true)}
+              >
+                Update
+              </Button>
+            </div>
+
+            <div className="border-t border-white/[0.07]" />
+
+            {isPaidBySelf ? (
+              <div className="space-y-2">
+                <Input
+                  value={
+                    paymentDetailsDraft ??
+                    initialBill?.paymentDetails?.trim() ??
+                    ""
+                  }
+                  placeholder="e.g. Venmo @you"
+                  maxLength={TEXT_LIMITS.paymentDetails}
+                  onChange={(e) => setPaymentDetailsDraft(e.target.value)}
+                  aria-label="Payment details"
+                />
+                <p className="text-sm text-muted-foreground">
+                  How others should pay you (Venmo, PayNow, bank, etc.).
+                </p>
+              </div>
+            ) : knownPaymentDetails ? (
+              <p className="break-words text-sm font-medium tracking-[-0.01em]">
+                {knownPaymentDetails}
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {paidByName
+                  ? `${paidByName} can add payment details on the bill.`
+                  : "Pick who paid to see how to pay them."}
+              </p>
+            )}
+          </Card>
+        </div>
+      ) : null}
 
       <div
         className={cn(
