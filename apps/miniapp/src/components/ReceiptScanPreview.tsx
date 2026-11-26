@@ -2,13 +2,13 @@ import React, { useEffect, useRef, useState } from "react";
 import { createShader, PALETTES, type Direction } from "glimm";
 
 const BAND_TIGHT = 14;
-/** Matches glimm's internal `containedOverscan(bandTight)` so we can map
- *  progress directly to visible UV edges `[EDGE_INSET, 1 - EDGE_INSET]`. */
+/** Matches glimm's internal `containedOverscan(bandTight)`. Crest at UV 1
+ *  (top) is progress `m/(1+2m)`; crest at UV 0 (bottom) is `(1+m)/(1+2m)`. */
 const CONTAINED_OVERSCAN = Math.max(0.2, Math.sqrt(4.6 / BAND_TIGHT));
-const EDGE_INSET = 0.03;
 const PROGRESS_START =
-  (CONTAINED_OVERSCAN + EDGE_INSET) / (1 + 2 * CONTAINED_OVERSCAN);
-const PROGRESS_END = 1 - PROGRESS_START;
+  CONTAINED_OVERSCAN / (1 + 2 * CONTAINED_OVERSCAN);
+const PROGRESS_END =
+  (1 + CONTAINED_OVERSCAN) / (1 + 2 * CONTAINED_OVERSCAN);
 const PASS_MS = 1200;
 const FADE_IN_MS = 180;
 
@@ -49,7 +49,8 @@ export function ReceiptScanPreview({
       palette: PALETTES.spectrum,
       direction: "ttb",
       bandTight: BAND_TIGHT,
-      feather: "auto",
+      // No edge fade — band must run left↔right and top↔bottom flush with the image.
+      feather: 0,
     });
     if (!ctrl) return;
 
@@ -73,7 +74,7 @@ export function ReceiptScanPreview({
         ctrl.setDirection(currentDir);
       }
 
-      // Smooth cosine turnaround so the band kisses each edge and reverses immediately.
+      // Smooth cosine turnaround: crest hits the image edge, then reverses.
       const eased = 0.5 * (1 - Math.cos(Math.PI * passT));
       ctrl.setProgress(
         PROGRESS_START + eased * (PROGRESS_END - PROGRESS_START),
@@ -94,12 +95,12 @@ export function ReceiptScanPreview({
 
   return (
     <div className="space-y-3">
-      <div className="relative mx-auto w-fit max-w-full overflow-hidden rounded-[22px] border border-border bg-card">
+      <div className="relative mx-auto w-fit max-w-full overflow-hidden rounded-[22px] bg-card">
         {previewUrl ? (
           <img
             src={previewUrl}
             alt="Receipt being scanned"
-            className="block max-h-[62vh] w-auto max-w-full object-contain"
+            className="block max-h-[62vh] w-auto max-w-full"
             draggable={false}
           />
         ) : (
@@ -110,7 +111,7 @@ export function ReceiptScanPreview({
         <canvas
           ref={canvasRef}
           data-dw-skip=""
-          className="pointer-events-none absolute inset-0 h-full w-full"
+          className="pointer-events-none absolute inset-0 size-full"
           aria-hidden
         />
       </div>
