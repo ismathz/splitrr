@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { parseBillIdFromStartParam } from "@splitbot/shared";
 
+import { useTelegramGroupMembers } from "@/lib/telegramGroupMembers";
 import { useTelegramLaunchContext } from "@/lib/telegramLaunchContext";
 
 export function AppShell() {
@@ -9,6 +10,8 @@ export function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const launchCtx = useTelegramLaunchContext();
   const didRouteBillDeepLink = useRef(false);
+  // Warm the roster cache at launch so avatars and the member picker open instantly.
+  useTelegramGroupMembers();
 
   useEffect(() => {
     if (didRouteBillDeepLink.current) return;

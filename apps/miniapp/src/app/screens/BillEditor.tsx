@@ -15,6 +15,7 @@ import {
   TEXT_LIMITS,
 } from "@splitbot/shared";
 import useEmblaCarousel from "embla-carousel-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   DndContext,
   MouseSensor,
@@ -97,6 +98,7 @@ import {
   updateMyPaymentDetails,
   uploadReceipt,
 } from "@/lib/splitbotApi";
+import { invalidateBillData } from "@/lib/queries";
 import { getItemDisplayEmoji } from "@/lib/itemEmoji";
 import { Icon } from "@/components/ui/icon";
 import { MemberAvatar } from "@/components/MemberAvatar";
@@ -289,6 +291,7 @@ export function BillEditor(props: BillEditorProps) {
     props.mode.kind === "create" ? props.mode.receiptFile : undefined;
 
   const launchCtx = useTelegramLaunchContext();
+  const queryClient = useQueryClient();
   const {
     members: groupMembers,
     isLoading: groupMembersLoading,
@@ -1213,6 +1216,8 @@ export function BillEditor(props: BillEditorProps) {
           title: normalizedTitle,
           ...persistPayload,
         });
+        // Refresh before leaving so the details view never flashes stale data.
+        await invalidateBillData(queryClient, editingBillId);
         props.onSaveComplete?.();
       } catch (e) {
         setSaveBillError(toUserFriendlyErrorMessage(e));
@@ -1233,6 +1238,8 @@ export function BillEditor(props: BillEditorProps) {
           title: normalizedTitle,
           ...persistPayload,
         });
+        // Not awaited: the details screen renders from cache + placeholder meanwhile.
+        void invalidateBillData(queryClient, serverBillId);
         props.onOpenBill?.(serverBillId);
       } catch (e) {
         setSaveBillError(toUserFriendlyErrorMessage(e));
@@ -1267,6 +1274,7 @@ export function BillEditor(props: BillEditorProps) {
         title,
         ...persistPayload,
       });
+      void invalidateBillData(queryClient, billId);
       props.onOpenBill?.(billId);
     } catch (e) {
       setSaveBillError(toUserFriendlyErrorMessage(e));
@@ -1289,6 +1297,7 @@ export function BillEditor(props: BillEditorProps) {
     paymentDetailsDraft,
     isPaidBySelf,
     initialBill?.paymentDetails,
+    queryClient,
     items,
     isServiceChargeEnabled,
     isTaxEnabled,

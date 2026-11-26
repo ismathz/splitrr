@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
 import { BillRow } from "@/components/BillRow";
@@ -12,12 +13,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-import { type BillDetails } from "../billTypes";
 import { mockBills } from "../billDevMocks";
 import { isDevMockDataEnabled } from "@/lib/devFlags";
 import { pickReceiptImage } from "@/lib/pickReceiptImage";
+import { billQueryOptions, historyQueryOptions } from "@/lib/queries";
 import {
-  getGroupHistoryByTelegramChatId,
   getSplitbotApiBase,
   resolveBillContextForApi,
 } from "@/lib/splitbotApi";
@@ -40,50 +40,24 @@ export function HomeScreen() {
     ],
   );
   const [isSelecting, setIsSelecting] = useState(false);
-  const [serverBills, setServerBills] = useState<BillDetails[] | null>(null);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const queryClient = useQueryClient();
+  const { data: serverBills, isPending } = useQuery(
+    historyQueryOptions(splitbotApiBase, billApiContext?.telegramChatId),
+  );
+  const isLoadingHistory =
+    isPending && Boolean(splitbotApiBase && billApiContext);
 
-  useEffect(() => {
-    let cancelled = false;
-    setServerBills(null);
-
-    if (!splitbotApiBase || !billApiContext) return;
-
-    setIsLoadingHistory(true);
-    (async () => {
-      try {
-        const { bills } = await getGroupHistoryByTelegramChatId(
-          splitbotApiBase,
-          billApiContext.telegramChatId,
-        );
-        if (cancelled) return;
-        setServerBills(
-          bills.map((bill) => ({
-            ...bill,
-            place: bill.place ?? null,
-            members: bill.members ?? [],
-            items: [],
-          })),
-        );
-      } catch {
-        if (!cancelled) {
-          setServerBills(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingHistory(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [splitbotApiBase, billApiContext]);
-
-  const bills =
-    serverBills ?? (isDevMockDataEnabled() ? mockBills : []);
+  const bills = serverBills ?? (isDevMockDataEnabled() ? mockBills : []);
   const billHistoryPreview = bills.slice(0, BILL_HISTORY_PREVIEW_LIMIT);
+
+  // Warm the bills the user is most likely to open next.
+  const previewIds = billHistoryPreview.map((b) => b.id).join(",");
+  useEffect(() => {
+    if (!serverBills || !splitbotApiBase || !previewIds) return;
+    for (const id of previewIds.split(",")) {
+      void queryClient.prefetchQuery(billQueryOptions(splitbotApiBase, id));
+    }
+  }, [serverBills, splitbotApiBase, previewIds, queryClient]);
   const hasMoreBills = bills.length > BILL_HISTORY_PREVIEW_LIMIT;
   const showingDevMocks = isDevMockDataEnabled() && serverBills == null;
 

@@ -1,16 +1,16 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
 import { BillRow } from "@/components/BillRow";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { historyQueryOptions } from "@/lib/queries";
 import {
-  getGroupHistoryByTelegramChatId,
   getSplitbotApiBase,
   resolveBillContextForApi,
 } from "@/lib/splitbotApi";
 import { useTelegramLaunchContext } from "@/lib/telegramLaunchContext";
-import { type BillDetails } from "../billTypes";
 import { mockBills } from "../billDevMocks";
 import { isDevMockDataEnabled } from "@/lib/devFlags";
 
@@ -29,49 +29,13 @@ export function BillHistoryScreen() {
     ],
   );
 
-  const [serverBills, setServerBills] = useState<BillDetails[] | null>(null);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const { data: serverBills, isPending } = useQuery(
+    historyQueryOptions(splitbotApiBase, billApiContext?.telegramChatId),
+  );
+  const isLoadingHistory =
+    isPending && Boolean(splitbotApiBase && billApiContext);
 
-  useEffect(() => {
-    let cancelled = false;
-    setServerBills(null);
-
-    if (!splitbotApiBase || !billApiContext) return;
-
-    setIsLoadingHistory(true);
-    (async () => {
-      try {
-        const { bills } = await getGroupHistoryByTelegramChatId(
-          splitbotApiBase,
-          billApiContext.telegramChatId,
-        );
-        if (cancelled) return;
-        setServerBills(
-          bills.map((bill) => ({
-            ...bill,
-            place: bill.place ?? null,
-            members: bill.members ?? [],
-            items: [],
-          })),
-        );
-      } catch {
-        if (!cancelled) {
-          setServerBills(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingHistory(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [splitbotApiBase, billApiContext]);
-
-  const bills =
-    serverBills ?? (isDevMockDataEnabled() ? mockBills : []);
+  const bills = serverBills ?? (isDevMockDataEnabled() ? mockBills : []);
   const showingDevMocks = isDevMockDataEnabled() && serverBills == null;
 
   return (

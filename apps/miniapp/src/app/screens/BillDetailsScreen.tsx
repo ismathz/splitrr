@@ -1,4 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
+import {
+  useMutationState,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
 import { BillStatusBadge } from "@/components/BillRow";
@@ -30,7 +35,6 @@ import {
 import {
   formatBillDateLabel,
   type BillCharge,
-  type BillDetails,
   type Item,
 } from "../billTypes";
 import { mockBills } from "../billDevMocks";
@@ -39,16 +43,18 @@ import { BillEditor } from "./BillEditor";
 import { getItemDisplayEmoji } from "@/lib/itemEmoji";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
+import { billUpdatePayload, useBillMutations } from "@/lib/billMutations";
 import {
-  announceBillToGroup,
-  deleteBill,
-  getBillDetails,
-  getBillPaymentStatus,
+  billQueryOptions,
+  findBillInHistoryCache,
+  paidNamesFrom,
+  paymentStatusQueryOptions,
+  queryKeys,
+  uniqueMembersInOrder,
+} from "@/lib/queries";
+import {
   getSplitbotApiBase,
   resolveBillContextForApi,
-  updateBillDetails,
-  updateBillPaymentStatus,
-  updateMyPaymentDetails,
 } from "@/lib/splitbotApi";
 import {
   useTelegramGroupMembers,
@@ -58,20 +64,6 @@ import { useTelegramLaunchContext } from "@/lib/telegramLaunchContext";
 import { toUserFriendlyErrorMessage } from "@/lib/userFriendlyError";
 import { MemberAvatar } from "@/components/MemberAvatar";
 import { sanitizeUserText, TEXT_LIMITS } from "@splitbot/shared";
-
-function uniqueMembersInOrder(items: Item[]): string[] {
-  const seen = new Set<string>();
-  const ordered: string[] = [];
-  for (const item of items) {
-    for (const name of item.assignees) {
-      if (!seen.has(name)) {
-        seen.add(name);
-        ordered.push(name);
-      }
-    }
-  }
-  return ordered;
-}
 
 function balancesCentsByMember(
   items: Item[],
@@ -84,27 +76,6 @@ function balancesCentsByMember(
 
 function formatBillMoney(currencyCode: string, cents: number) {
   return `${currencyCode} ${(cents / 100).toFixed(2)}`;
-}
-
-function mapApiBillToDetails(
-  fetched: Awaited<ReturnType<typeof getBillDetails>>,
-): BillDetails {
-  const items = fetched.items.map((item) => ({
-    ...item,
-    assignees: item.assignees ?? [],
-  }));
-  const membersFromApi = (fetched.members ?? [])
-    .map((m) => m.trim())
-    .filter(Boolean);
-  const members =
-    membersFromApi.length > 0 ? membersFromApi : uniqueMembersInOrder(items);
-  return {
-    ...fetched,
-    members,
-    memberProfiles: fetched.memberProfiles ?? [],
-    items,
-    charges: fetched.charges ?? [],
-  };
 }
 
 function AssigneesRow({
@@ -147,16 +118,40 @@ function AssigneesRow({
 }
 
 export function BillDetailsScreen({ billId }: { billId: string }) {
-  const [serverBill, setServerBill] = useState<BillDetails | null>(null);
-  const [isLoadingBill, setIsLoadingBill] = useState(true);
-  const [loadBillError, setLoadBillError] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
-  const [reloadToken, setReloadToken] = useState(0);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
-  const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [titleSaveError, setTitleSaveError] = useState<string | null>(null);
   const splitbotApiBase = useMemo(() => getSplitbotApiBase(), []);
+  const queryClient = useQueryClient();
+  const billQuery = useQuery({
+    ...billQueryOptions(splitbotApiBase, billId),
+    // History rows carry title/status/date, so the header paints at once.
+    placeholderData: () => findBillInHistoryCache(queryClient, billId),
+  });
+  const serverBill = billQuery.data;
+  /** History-row seed only: items, charges and payer are not loaded yet. */
+  const isPlaceholder = billQuery.isPlaceholderData;
+  const isLoadingBill = billQuery.isLoading;
+  const paymentStatusQuery = useQuery(
+    paymentStatusQueryOptions(splitbotApiBase, billId),
+  );
+  const paidMemberNames = useMemo(
+    () => paidNamesFrom(paymentStatusQuery.data),
+    [paymentStatusQuery.data],
+  );
+  const mutations = useBillMutations(splitbotApiBase, billId);
+  const savingPaidMemberNames = new Set(
+    useMutationState({
+      filters: { mutationKey: ["togglePaid", billId], status: "pending" },
+      select: (m) => (m.state.variables as { name: string }).name,
+    }),
+  );
+  const isSavingTitle = mutations.saveTitle.isPending;
+  const isAnnouncing = mutations.announce.isPending;
+  const isDeletingBill = mutations.remove.isPending;
+  const isSavingPaymentDetails = mutations.savePaymentDetails.isPending;
+  const isSavingPaidBy = mutations.selectPaidBy.isPending;
   const launchCtx = useTelegramLaunchContext();
   const { members: groupMembers } = useTelegramGroupMembers();
   const miniappApiBase = useMemo(
@@ -234,38 +229,10 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
 
   const navigate = useNavigate();
 
-  useEffect(() => {
-    let cancelled = false;
-    setIsLoadingBill(true);
-    setLoadBillError(null);
-    setServerBill(null);
-
-    if (!splitbotApiBase) {
-      setIsLoadingBill(false);
-      return;
-    }
-
-    (async () => {
-      try {
-        const fetched = await getBillDetails(splitbotApiBase, billId);
-        if (cancelled) return;
-        setServerBill(mapApiBillToDetails(fetched));
-      } catch (e) {
-        if (cancelled) return;
-        if (!mockBill) {
-          setLoadBillError(toUserFriendlyErrorMessage(e));
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingBill(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [billId, splitbotApiBase, mockBill, reloadToken]);
+  const loadBillError =
+    billQuery.error && !mockBill
+      ? toUserFriendlyErrorMessage(billQuery.error)
+      : null;
 
   const currentUserDisplayName = useMemo(() => {
     const u = launchCtx.currentUser;
@@ -320,23 +287,12 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
   );
   const grandTotalCents = subtotalCents + taxCents + additionalChargesCents;
 
-  const [paidMemberNames, setPaidMemberNames] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const [savingPaidMemberNames, setSavingPaidMemberNames] = useState<
-    Set<string>
-  >(() => new Set());
-  const [paymentStatusError, setPaymentStatusError] = useState<string | null>(
-    null,
-  );
   const [paymentToastMessage, setPaymentToastMessage] = useState<string | null>(
     null,
   );
   const [isActionsPopoverOpen, setIsActionsPopoverOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [isDeletingBill, setIsDeletingBill] = useState(false);
   const [deleteBillError, setDeleteBillError] = useState<string | null>(null);
-  const [isAnnouncing, setIsAnnouncing] = useState(false);
   const [announceError, setAnnounceError] = useState<string | null>(null);
   const [announceToastMessage, setAnnounceToastMessage] = useState<
     string | null
@@ -344,11 +300,9 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
   const [copiedPaymentDetails, setCopiedPaymentDetails] = useState(false);
   const [isEditingPaymentDetails, setIsEditingPaymentDetails] = useState(false);
   const [draftPaymentDetails, setDraftPaymentDetails] = useState("");
-  const [isSavingPaymentDetails, setIsSavingPaymentDetails] = useState(false);
   const [paymentDetailsError, setPaymentDetailsError] = useState<string | null>(
     null,
   );
-  const [isSavingPaidBy, setIsSavingPaidBy] = useState(false);
   const [isPaidByDialogOpen, setIsPaidByDialogOpen] = useState(false);
 
   useEffect(() => {
@@ -359,198 +313,73 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
     setIsPaidByDialogOpen(false);
   }, [billId]);
 
-  const syncBillStatusFromPaid = (nextPaid: Set<string>) => {
-    const allPaid =
-      membersOrdered.length > 0 &&
-      membersOrdered.every((m) => nextPaid.has(m));
-    setServerBill((billPrev) =>
-      billPrev
-        ? {
-            ...billPrev,
-            status: allPaid ? "completed" : "pending",
-            settled: allPaid,
-          }
-        : billPrev,
-    );
-  };
-
   const selectPaidBy = async (name: string) => {
-    if (!bill || !splitbotApiBase) return;
+    if (!bill || isPlaceholder || !splitbotApiBase) return;
     const current = (bill.paidByName ?? "").trim().toLowerCase();
     if (name.toLowerCase() === current) {
       setIsPaidByDialogOpen(false);
       return;
     }
 
-    setIsSavingPaidBy(true);
     setPaymentDetailsError(null);
-    const previousPaidByName = bill.paidByName;
-    const previousIsPayer = bill.isCurrentUserPayer;
-    const previousPaymentDetails = bill.paymentDetails;
     const isSelf =
       currentUserDisplayName != null &&
       name.toLowerCase() === currentUserDisplayName.toLowerCase();
-
-    setServerBill((prev) =>
-      prev
-        ? {
-            ...prev,
-            paidByName: name,
-            isCurrentUserPayer: isSelf,
-          }
-        : prev,
-    );
     setIsPaidByDialogOpen(false);
-
     try {
-      await updateBillDetails(splitbotApiBase, billId, {
-        title: bill.title,
-        billDate: bill.billDate,
-        place: bill.place,
-        members: membersOrdered,
-        paidByName: name,
-        items: bill.items.map((item) => ({
-          id: item.id,
-          name: item.name,
-          totalPriceCents: item.totalPriceCents,
-          assignees: item.assignees ?? [],
-        })),
-        charges: bill.charges ?? [],
+      await mutations.selectPaidBy.mutateAsync({
+        name,
+        isSelf,
+        payload: billUpdatePayload(bill, membersOrdered, { paidByName: name }),
       });
-      const fetched = await getBillDetails(splitbotApiBase, billId);
-      setServerBill(mapApiBillToDetails(fetched));
     } catch (e) {
-      setServerBill((prev) =>
-        prev
-          ? {
-              ...prev,
-              paidByName: previousPaidByName,
-              isCurrentUserPayer: previousIsPayer,
-              paymentDetails: previousPaymentDetails,
-            }
-          : prev,
-      );
       setPaymentToastMessage(toUserFriendlyErrorMessage(e));
-    } finally {
-      setIsSavingPaidBy(false);
     }
   };
 
   const togglePaid = async (name: string, next: boolean) => {
-    setPaymentStatusError(null);
-    setPaidMemberNames((prev) => {
-      const nextSet = new Set(prev);
-      if (next) nextSet.add(name);
-      else nextSet.delete(name);
-      syncBillStatusFromPaid(nextSet);
-      return nextSet;
-    });
-
-    if (!splitbotApiBase) return;
-
-    setSavingPaidMemberNames((prev) => {
-      const nextSet = new Set(prev);
-      nextSet.add(name);
-      return nextSet;
-    });
     try {
-      const result = await updateBillPaymentStatus(splitbotApiBase, billId, {
+      await mutations.togglePaid.mutateAsync({
         name,
         paid: next,
+        membersOrdered,
       });
-      if (result.status) {
-        setServerBill((prev) =>
-          prev
-            ? {
-                ...prev,
-                status: result.status!,
-                settled: result.status === "completed",
-              }
-            : prev,
-        );
-      }
     } catch (e) {
-      const message = toUserFriendlyErrorMessage(e);
-      // Revert immediately when persistence fails.
-      setPaidMemberNames((prev) => {
-        const nextSet = new Set(prev);
-        if (next) nextSet.delete(name);
-        else nextSet.add(name);
-        syncBillStatusFromPaid(nextSet);
-        return nextSet;
-      });
-      setPaymentStatusError(message);
-      setPaymentToastMessage(message);
-    } finally {
-      setSavingPaidMemberNames((prev) => {
-        const nextSet = new Set(prev);
-        nextSet.delete(name);
-        return nextSet;
-      });
+      setPaymentToastMessage(toUserFriendlyErrorMessage(e));
     }
   };
 
   const saveBillTitle = async () => {
-    if (!bill) return;
+    if (!bill || isPlaceholder) return;
     const nextTitle = draftTitle.trim() || "Untitled bill";
     setIsEditingTitle(false);
     setTitleSaveError(null);
     if (nextTitle === bill.title) return;
 
-    setServerBill((prev) => (prev ? { ...prev, title: nextTitle } : prev));
-    if (!splitbotApiBase) return;
-
-    setIsSavingTitle(true);
     try {
-      await updateBillDetails(splitbotApiBase, billId, {
+      await mutations.saveTitle.mutateAsync({
         title: nextTitle,
-        billDate: bill.billDate,
-        place: bill.place,
-        members: membersOrdered,
-        items: bill.items.map((item) => ({
-          id: item.id,
-          name: item.name,
-          totalPriceCents: item.totalPriceCents,
-          assignees: item.assignees ?? [],
-        })),
-        charges: bill.charges ?? [],
+        payload: billUpdatePayload(bill, membersOrdered, { title: nextTitle }),
       });
     } catch (e) {
       setTitleSaveError(toUserFriendlyErrorMessage(e));
-      setReloadToken((t) => t + 1);
-    } finally {
-      setIsSavingTitle(false);
     }
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    setPaymentStatusError(null);
-    setPaidMemberNames(new Set());
-
+  const savePaymentDetails = async () => {
     if (!splitbotApiBase) return;
-
-    (async () => {
-      try {
-        const { members } = await getBillPaymentStatus(splitbotApiBase, billId);
-        if (cancelled) return;
-        const nextPaid = new Set<string>();
-        for (const member of members) {
-          const name = member.name.trim();
-          if (!name) continue;
-          if (member.paid) nextPaid.add(name);
-        }
-        setPaidMemberNames(nextPaid);
-      } catch (e) {
-        if (cancelled) return;
-        setPaymentStatusError(toUserFriendlyErrorMessage(e));
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [splitbotApiBase, billId, reloadToken]);
+    setPaymentDetailsError(null);
+    const clipped =
+      sanitizeUserText(draftPaymentDetails, TEXT_LIMITS.paymentDetails) || null;
+    setIsEditingPaymentDetails(false);
+    try {
+      await mutations.savePaymentDetails.mutateAsync(clipped);
+    } catch (e) {
+      // Reopen the editor with the draft intact so nothing typed is lost.
+      setIsEditingPaymentDetails(true);
+      setPaymentDetailsError(toUserFriendlyErrorMessage(e));
+    }
+  };
 
   useEffect(() => {
     if (!paymentToastMessage) return;
@@ -569,15 +398,14 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
     }
 
     setDeleteBillError(null);
-    setIsDeletingBill(true);
     try {
-      await deleteBill(splitbotApiBase, billId);
+      await mutations.remove.mutateAsync();
       setIsDeleteDialogOpen(false);
-      navigate({ to: "/" });
+      await navigate({ to: "/" });
+      // Only drop the cache once this screen is gone, or it would refetch a 404.
+      queryClient.removeQueries({ queryKey: queryKeys.bill(billId) });
     } catch (e) {
       setDeleteBillError(toUserFriendlyErrorMessage(e));
-    } finally {
-      setIsDeletingBill(false);
     }
   };
 
@@ -587,21 +415,13 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
       return;
     }
     setAnnounceError(null);
-    setIsAnnouncing(true);
     try {
-      await announceBillToGroup(splitbotApiBase, billId);
-      setServerBill((prev) =>
-        prev && prev.status === "draft"
-          ? { ...prev, status: "pending", settled: false }
-          : prev,
-      );
+      await mutations.announce.mutateAsync();
       setAnnounceToastMessage("Shared to the group.");
     } catch (e) {
       const message = toUserFriendlyErrorMessage(e);
       setAnnounceError(message);
       setAnnounceToastMessage(message);
-    } finally {
-      setIsAnnouncing(false);
     }
   };
 
@@ -685,10 +505,8 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
         }}
         onBack={() => navigate({ to: "/" })}
         onCancel={() => setIsEditMode(false)}
-        onSaveComplete={() => {
-          setIsEditMode(false);
-          setReloadToken((t) => t + 1);
-        }}
+        // The editor awaits a cache refresh before calling this.
+        onSaveComplete={() => setIsEditMode(false)}
       />
     );
   }
@@ -707,6 +525,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
           <Button
             variant="outline"
             onClick={() => setIsEditMode(true)}
+            disabled={isPlaceholder}
             className="w-max"
           >
             Edit
@@ -781,6 +600,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
             <button
               type="button"
               className="text-left"
+              disabled={isPlaceholder}
               onClick={() => {
                 setDraftTitle(bill.title);
                 setIsEditingTitle(true);
@@ -807,6 +627,15 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
           </CardDescription>
         </div>
 
+        {isPlaceholder ? (
+          <Card className="rounded-[22px] border-0 p-4">
+            <div className="space-y-1">
+              <CardTitle className="text-base">Loading details…</CardTitle>
+              <CardDescription>Fetching items and payments.</CardDescription>
+            </div>
+          </Card>
+        ) : (
+        <>
         <div className="space-y-2">
           {bill.items.map((item) => (
             <Card key={item.id} className="rounded-[22px] border-0 p-3.5">
@@ -1011,37 +840,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                     type="button"
                     disabled={isSavingPaymentDetails}
                     onClick={() => {
-                      if (!splitbotApiBase) return;
-                      void (async () => {
-                        setIsSavingPaymentDetails(true);
-                        setPaymentDetailsError(null);
-                        try {
-                          const clipped =
-                            sanitizeUserText(
-                              draftPaymentDetails,
-                              TEXT_LIMITS.paymentDetails,
-                            ) || null;
-                          const result = await updateMyPaymentDetails(
-                            splitbotApiBase,
-                            clipped,
-                          );
-                          setServerBill((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  paymentDetails: result.paymentDetails,
-                                }
-                              : prev,
-                          );
-                          setIsEditingPaymentDetails(false);
-                        } catch (e) {
-                          setPaymentDetailsError(
-                            toUserFriendlyErrorMessage(e),
-                          );
-                        } finally {
-                          setIsSavingPaymentDetails(false);
-                        }
-                      })();
+                      void savePaymentDetails();
                     }}
                   >
                     {isSavingPaymentDetails ? "Saving…" : "Save"}
@@ -1081,6 +880,7 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
                   <Button
                     type="button"
                     variant="secondary"
+                    disabled={isSavingPaidBy}
                     onClick={() => {
                       const text = bill.paymentDetails?.trim();
                       if (!text) return;
@@ -1129,6 +929,8 @@ export function BillDetailsScreen({ billId }: { billId: string }) {
             )}
           </Card>
         </div>
+        </>
+        )}
       </div>
 
       <Dialog

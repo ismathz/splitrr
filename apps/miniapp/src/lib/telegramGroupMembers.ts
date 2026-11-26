@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { mockMembers } from "@/app/billDevMocks";
 import { isDevMockDataEnabled } from "@/lib/devFlags";
+import { rosterQueryOptions } from "@/lib/queries";
 import {
-  getGroupRosterByTelegramChatId,
   getSplitbotApiBase,
   GroupRosterRequestError,
   resolveBillContextForApi,
@@ -411,197 +412,193 @@ export function useTelegramGroupMembers(): UseTelegramGroupMembersResult {
     return () => timeouts.forEach(clearTimeout);
   }, []);
 
-  const [members, setMembers] = useState<TelegramGroupMember[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [memberCount, setMemberCount] = useState<number | null>(null);
-  const [seenCount, setSeenCount] = useState(0);
-  const [unseenCount, setUnseenCount] = useState<number | null>(null);
-  const [status, setStatus] = useState<RosterLoadStatus>("loading");
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const apiBase = getSplitbotApiBase();
+  const billCtx = resolveBillContextForApi(launch);
+  const telegramChatId = billCtx?.telegramChatId;
+  const botBase = import.meta.env.VITE_BOT_MINIAPP_API;
+  const hasInitData = Boolean(launch.initData?.trim());
+  const useMocks = isDevMockDataEnabled();
+  const canFetchRoster =
+    Boolean(apiBase) && Boolean(telegramChatId) && (hasInitData || useMocks);
+  const canFetchBot =
+    typeof botBase === "string" &&
+    botBase.trim().length > 0 &&
+    hasInitData &&
+    !useMocks;
 
+  // Cached across screens: every avatar/row on every screen shares one fetch.
+  const rosterQuery = useQuery(
+    rosterQueryOptions(apiBase, telegramChatId, canFetchRoster),
+  );
+  const botQuery = useQuery({
+    queryKey: ["bot-members", telegramChatId ?? "", launch.currentUser?.id ?? null],
+    queryFn: async () => {
+      const members = await fetchMembersFromBotApi(
+        launch.initData,
+        telegramChatId ?? null,
+      );
+      if (!members) throw new Error("bot members unavailable");
+      return members;
+    },
+    enabled: canFetchBot,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+
+  const rosterError = rosterQuery.error;
   useEffect(() => {
-    const apiBase = getSplitbotApiBase();
-    const billCtx = resolveBillContextForApi(launch);
-    const botBase = import.meta.env.VITE_BOT_MINIAPP_API;
-    const hasInitData = Boolean(launch.initData?.trim());
-    const useMocks = isDevMockDataEnabled();
-    const canFetchRoster =
-      Boolean(apiBase) &&
-      Boolean(billCtx?.telegramChatId) &&
-      (hasInitData || useMocks);
-    const canFetchBot =
-      typeof botBase === "string" &&
-      botBase.trim().length > 0 &&
-      hasInitData &&
-      !useMocks;
+    if (rosterError) console.warn("[splitrr] roster fetch failed", rosterError);
+  }, [rosterError]);
 
+  const rosterData = rosterQuery.data;
+  const botData = botQuery.data;
+  const rosterPending = canFetchRoster && rosterQuery.isPending;
+  const botPending = canFetchBot && botQuery.isPending;
+
+  return useMemo<UseTelegramGroupMembersResult>(() => {
     if (!canFetchRoster && !canFetchBot) {
       const sync = withCurrentUser(resolveTelegramGroupMembersSync(), launch);
-      setMembers(sync);
-      setSeenCount(sync.length);
-      setMemberCount(null);
-      setUnseenCount(null);
-      setIsLoading(false);
+      const base = {
+        members: sync,
+        isLoading: false,
+        memberCount: null,
+        seenCount: sync.length,
+        unseenCount: null,
+      };
       if (!hasInitData) {
-        setStatus("no_context");
-        setStatusMessage(
-          "Open Splitrr from Telegram via /split in the group so it can load the roster.",
-        );
-      } else if (!billCtx?.telegramChatId) {
-        setStatus("no_context");
-        setStatusMessage(
-          "Missing group id (startapp cid). Re-open with /split in the group.",
-        );
-      } else if (!apiBase) {
-        setStatus("error");
-        setStatusMessage("Mini App was built without VITE_SPLITBOT_API.");
-      } else if (sync.length) {
-        setStatus("ok");
-        setStatusMessage(null);
-      } else {
-        setStatus("empty");
-        setStatusMessage(
-          "No members yet. Run /split in the group. You can still add people by name.",
-        );
+        return {
+          ...base,
+          status: "no_context",
+          statusMessage:
+            "Open Splitrr from Telegram via /split in the group so it can load the roster.",
+        };
       }
-      return;
+      if (!telegramChatId) {
+        return {
+          ...base,
+          status: "no_context",
+          statusMessage:
+            "Missing group id (startapp cid). Re-open with /split in the group.",
+        };
+      }
+      if (!apiBase) {
+        return {
+          ...base,
+          status: "error",
+          statusMessage: "Mini App was built without VITE_SPLITBOT_API.",
+        };
+      }
+      if (sync.length) return { ...base, status: "ok", statusMessage: null };
+      return {
+        ...base,
+        status: "empty",
+        statusMessage:
+          "No members yet. Run /split in the group. You can still add people by name.",
+      };
     }
 
-    setIsLoading(true);
-    setStatus("loading");
-    let cancelled = false;
+    if (rosterPending || botPending) {
+      return {
+        members: [],
+        isLoading: true,
+        memberCount: null,
+        seenCount: 0,
+        unseenCount: null,
+        status: "loading",
+        statusMessage: null,
+      };
+    }
+
     const sync = resolveTelegramGroupMembersSync();
+    let rosterMembers: TelegramGroupMember[] = [];
+    let memberCount: number | null = null;
+    let unseen: number | null = null;
+    let rosterStatus: RosterLoadStatus | null = null;
+    let rosterMessage: string | null = null;
 
-    (async () => {
-      try {
-        let rosterMembers: TelegramGroupMember[] = [];
-        let nextMemberCount: number | null = null;
-        let nextUnseen: number | null = null;
-        let rosterStatus: RosterLoadStatus | null = null;
-        let rosterMessage: string | null = null;
-
-        if (canFetchRoster && billCtx) {
-          try {
-            const roster = await getGroupRosterByTelegramChatId(
-              apiBase,
-              billCtx.telegramChatId,
-            );
-            rosterMembers = roster.members.map((m) => ({
-              tgUserId: m.tgUserId,
-              name: m.name,
-              username: m.username,
-              photoUrl: m.photoUrl ?? undefined,
-            }));
-            nextMemberCount = roster.memberCount;
-            nextUnseen = roster.unseenCount;
-            if (!rosterMembers.length) {
-              rosterStatus = "empty";
-              rosterMessage =
-                "No members yet. Run /split in the group. You can still add people by name.";
-            }
-          } catch (err) {
-            rosterMembers = [];
-            if (err instanceof GroupRosterRequestError && (err.status === 401 || err.status === 403)) {
-              rosterStatus = "auth_error";
-              rosterMessage =
-                "Could not authorize with Telegram. Close and re-open Splitrr from /split.";
-            } else {
-              rosterStatus = "error";
-              rosterMessage =
-                "Could not load the group roster. Check your connection and try again.";
-            }
-            console.warn("[splitrr] roster fetch failed", err);
-          }
-        }
-
-        let botMembers: TelegramGroupMember[] = [];
-        if (canFetchBot) {
-          try {
-            botMembers =
-              (await fetchMembersFromBotApi(
-                launch.initData,
-                billCtx?.telegramChatId ?? null,
-              )) ?? [];
-          } catch {
-            botMembers = [];
-          }
-        }
-
-        if (cancelled) return;
-
-        let merged = mergeMemberLists(rosterMembers, botMembers);
-        if (!merged.length && sync.length) {
-          merged = sync;
-        }
-        merged = withCurrentUser(merged, launch);
-
-        setMembers(merged);
-        setSeenCount(merged.length);
-        setMemberCount(nextMemberCount);
-        setUnseenCount(
-          nextUnseen != null
-            ? nextUnseen
-            : nextMemberCount != null
-              ? Math.max(0, nextMemberCount - merged.length)
-              : null,
-        );
-
-        if (merged.length > 0) {
-          setStatus("ok");
-          setStatusMessage(
-            nextMemberCount != null && merged.length < nextMemberCount
-              ? `Showing ${merged.length} of ${nextMemberCount} people. Add anyone missing by name.`
-              : null,
-          );
-        } else if (rosterStatus) {
-          setStatus(rosterStatus);
-          setStatusMessage(rosterMessage);
-        } else {
-          setStatus("empty");
-          setStatusMessage(
-            "No members yet. Run /split in the group. You can still add people by name.",
-          );
-        }
-      } catch (err) {
-        if (!cancelled) {
-          const fallback = withCurrentUser(sync.length ? sync : [], launch);
-          setMembers(fallback);
-          setSeenCount(fallback.length);
-          setMemberCount(null);
-          setUnseenCount(null);
-          setStatus(fallback.length ? "ok" : "error");
-          setStatusMessage(
-            fallback.length
-              ? null
-              : "Could not load members. Re-open from /split in the group.",
-          );
-          console.warn("[splitrr] group members resolve failed", err);
-        }
-      } finally {
-        if (!cancelled) setIsLoading(false);
+    if (rosterData) {
+      rosterMembers = rosterData.members.map((m) => ({
+        tgUserId: m.tgUserId,
+        name: m.name,
+        username: m.username,
+        photoUrl: m.photoUrl ?? undefined,
+      }));
+      memberCount = rosterData.memberCount;
+      unseen = rosterData.unseenCount;
+      if (!rosterMembers.length) {
+        rosterStatus = "empty";
+        rosterMessage =
+          "No members yet. Run /split in the group. You can still add people by name.";
       }
-    })();
+    } else if (rosterError) {
+      if (
+        rosterError instanceof GroupRosterRequestError &&
+        (rosterError.status === 401 || rosterError.status === 403)
+      ) {
+        rosterStatus = "auth_error";
+        rosterMessage =
+          "Could not authorize with Telegram. Close and re-open Splitrr from /split.";
+      } else {
+        rosterStatus = "error";
+        rosterMessage =
+          "Could not load the group roster. Check your connection and try again.";
+      }
+    }
 
-    return () => {
-      cancelled = true;
+    let merged = mergeMemberLists(rosterMembers, botData ?? []);
+    if (!merged.length && sync.length) merged = sync;
+    merged = withCurrentUser(merged, launch);
+
+    const result = {
+      members: merged,
+      isLoading: false,
+      memberCount,
+      seenCount: merged.length,
+      unseenCount:
+        unseen != null
+          ? unseen
+          : memberCount != null
+            ? Math.max(0, memberCount - merged.length)
+            : null,
     };
+    if (merged.length > 0) {
+      return {
+        ...result,
+        status: "ok",
+        statusMessage:
+          memberCount != null && merged.length < memberCount
+            ? `Showing ${merged.length} of ${memberCount} people. Add anyone missing by name.`
+            : null,
+      };
+    }
+    if (rosterStatus) {
+      return { ...result, status: rosterStatus, statusMessage: rosterMessage };
+    }
+    return {
+      ...result,
+      status: "empty",
+      statusMessage:
+        "No members yet. Run /split in the group. You can still add people by name.",
+    };
+    // `launch` is re-read on a timer; depend on the fields that matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    canFetchRoster,
+    canFetchBot,
+    hasInitData,
+    telegramChatId,
+    apiBase,
+    rosterPending,
+    botPending,
+    rosterData,
+    rosterError,
+    botData,
     launch.initData,
     launch.currentUser?.id,
     launch.startParam,
     launch.chat?.id,
     launch.chatType,
   ]);
-
-  return {
-    members,
-    isLoading,
-    memberCount,
-    seenCount,
-    unseenCount,
-    status,
-    statusMessage,
-  };
 }
 
 /** @deprecated Prefer `useTelegramGroupMembers()` which returns `{ members, isLoading }`. */

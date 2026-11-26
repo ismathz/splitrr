@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { MemberAvatar } from "@/components/MemberAvatar";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +8,8 @@ import {
   useTelegramGroupMembers,
   type TelegramGroupMember,
 } from "@/lib/telegramGroupMembers";
+import { billQueryOptions } from "@/lib/queries";
+import { getSplitbotApiBase } from "@/lib/splitbotApi";
 import { cn } from "@/lib/utils";
 
 import {
@@ -124,6 +127,12 @@ export function BillRow({
   bill: BillDetails;
   onView: () => void;
 }) {
+  const queryClient = useQueryClient();
+  // Start fetching on touch-down so the details screen is warm by the time the tap lands.
+  const prefetchBill = () => {
+    const base = getSplitbotApiBase();
+    if (base) void queryClient.prefetchQuery(billQueryOptions(base, bill.id));
+  };
   const members = useMemo(() => {
     if (bill.members?.length) {
       return bill.members.map((m) => m.trim()).filter(Boolean);
@@ -145,6 +154,7 @@ export function BillRow({
     <Card
       className="cursor-pointer rounded-lg border-0 bg-card p-3.5 transition-[transform,background-color] duration-150 hover:bg-white/[0.08] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={onView}
+      onPointerDown={prefetchBill}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
